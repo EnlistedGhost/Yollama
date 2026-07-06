@@ -1,10 +1,10 @@
 <p align="center">
   <a href="[Xllama](https://github.com/EnlistedGhost/Xllama)">
-    <img src="https://github.com/xllama/xllama/assets/3325447/0d0b44e2-8f4a-4e99-9b52-a5c1c741c8f7" alt="xllama" width="256"/>
+    <img src="https://github.com/xllama/xllama/assets/" alt="Xllama" width="256"/>
   </a>
 </p>
 
-## Xllama Development | May-2025 to June-2026
+## Xllama Development | May-2025 to July-2026
 
 ### *Enjoy true data privacy with offline Freedom for your LLM AI models*
 -----------------------------
