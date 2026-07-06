@@ -33,7 +33,7 @@ jobs:
       - name: Set environment
         id: goflags
         run: |
-          echo GOFLAGS="'-ldflags=-w -s \"-X=github.com/ollama/ollama/version.Version=${GITHUB_REF_NAME#v}\" \"-X=github.com/ollama/ollama/server.mode=release\"'" | tee -a $GITHUB_OUTPUT
+          echo GOFLAGS="'-ldflags=-w -s \"-X=github.com/EnlistedGhost/Xllama/version.Version=${GITHUB_REF_NAME#v}\" \"-X=github.com/xllama/xllama/server.mode=release\"'" | tee -a $GITHUB_OUTPUT
           echo VERSION="${GITHUB_REF_NAME#v}" | tee -a $GITHUB_OUTPUT
           echo vendorsha=$(cat LLAMA_CPP_VERSION)-$(cat MLX_VERSION)-$(cat MLX_C_VERSION) | tee -a $GITHUB_OUTPUT
 
@@ -111,9 +111,9 @@ jobs:
             APT_MIRROR=http://azure.archive.ubuntu.com/ubuntu
             APT_PORTS_MIRROR=http://azure.ports.ubuntu.com/ubuntu-ports
           cache-from: |
-            type=registry,ref=ollama/release:cache-${{ matrix.arch }}-${{ matrix.target }}
+            type=registry,ref=xllama/release:cache-${{ matrix.arch }}-${{ matrix.target }}
             type=registry,ref=${{ vars.DOCKER_REPO }}:latest
-          cache-to: type=registry,ref=ollama/release:cache-${{ matrix.arch }}-${{ matrix.target }},mode=max
+          cache-to: type=registry,ref=xllama/release:cache-${{ matrix.arch }}-${{ matrix.target }},mode=max
 
   linux-build:
     strategy:
@@ -152,16 +152,16 @@ jobs:
         run: |
           ./scripts/deduplicate_cuda_libs.sh dist/${{ matrix.os }}-${{ matrix.arch }}
       - run: |
-          for COMPONENT in bin/* lib/ollama/*; do
+          for COMPONENT in bin/* lib/xllama/*; do
             case "$COMPONENT" in
-              bin/ollama*)               echo $COMPONENT >>ollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/ollama/*.so*)          echo $COMPONENT >>ollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/ollama/cuda_v*)        echo $COMPONENT >>ollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/ollama/vulkan*)        echo $COMPONENT >>ollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/ollama/mlx*)           echo $COMPONENT >>ollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/ollama/cuda_jetpack5)  echo $COMPONENT >>ollama-${{ matrix.os }}-${{ matrix.arch }}-jetpack5.tar.in ;;
-              lib/ollama/cuda_jetpack6)  echo $COMPONENT >>ollama-${{ matrix.os }}-${{ matrix.arch }}-jetpack6.tar.in ;;
-              lib/ollama/rocm)           echo $COMPONENT >>ollama-${{ matrix.os }}-${{ matrix.arch }}-rocm.tar.in ;;
+              bin/xllama*)               echo $COMPONENT >>xllama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
+              lib/xllama/*.so*)          echo $COMPONENT >>xllama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
+              lib/xllama/cuda_v*)        echo $COMPONENT >>xllama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
+              lib/xllama/vulkan*)        echo $COMPONENT >>xllama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
+              lib/xllama/mlx*)           echo $COMPONENT >>xllama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
+              lib/xllama/cuda_jetpack5)  echo $COMPONENT >>xllama-${{ matrix.os }}-${{ matrix.arch }}-jetpack5.tar.in ;;
+              lib/xllama/cuda_jetpack6)  echo $COMPONENT >>xllama-${{ matrix.os }}-${{ matrix.arch }}-jetpack6.tar.in ;;
+              lib/xllama/rocm)           echo $COMPONENT >>xllama-${{ matrix.os }}-${{ matrix.arch }}-rocm.tar.in ;;
             esac
           done
         working-directory: dist/${{ matrix.os }}-${{ matrix.arch }}
