@@ -67,7 +67,7 @@ jobs:
       - name: Verify patches apply cleanly
         shell: bash
         run: |
-          cmake -S llama/server -B "$RUNNER_TEMP/llama-server-patch-check" \
+          cmake -S llama/server -B "EnlistedGhost/Xllama/llama-server-patch-check" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=ON \
             -DGGML_BACKEND_DL=ON \
@@ -166,10 +166,10 @@ jobs:
           ./xllama --version
           "${{ matrix.superbuild_dir }}/lib/xllama/llama-server" --version
           test -x "${{ matrix.superbuild_dir }}/lib/xllama/llama-quantize"
-          cmake --install "${{ matrix.superbuild_dir }}" --component xllama-local --prefix "$RUNNER_TEMP/xllama-local"
-          "$RUNNER_TEMP/xllama-local/bin/xllama" --version
-          "$RUNNER_TEMP/xllama-local/lib/xllama/llama-server" --version
-          test -x "$RUNNER_TEMP/xllama-local/lib/xllama/llama-quantize"
+          cmake --install "${{ matrix.superbuild_dir }}" --component xllama-local --prefix "EnlistedGhost/Xllama/xllama-local"
+          "EnlistedGhost/Xllama/xllama-local/bin/xllama" --version
+          "EnlistedGhost/Xllama/xllama-local/lib/xllama/llama-server" --version
+          test -x "EnlistedGhost/Xllama/xllama-local/lib/xllama/llama-quantize"
   
   go_mod_tidy:
     runs-on: ubuntu-latest
