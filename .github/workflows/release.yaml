@@ -37,54 +37,6 @@ jobs:
           echo VERSION="${GITHUB_REF_NAME#v}" | tee -a $GITHUB_OUTPUT
           echo vendorsha=$(cat LLAMA_CPP_VERSION)-$(cat MLX_VERSION)-$(cat MLX_C_VERSION) | tee -a $GITHUB_OUTPUT
 
-  darwin-build:
-    runs-on: macos-26-xlarge
-    environment: release
-    needs: setup-environment
-    env:
-      GOFLAGS: ${{ needs.setup-environment.outputs.GOFLAGS }}
-      VERSION: ${{ needs.setup-environment.outputs.VERSION }}
-      APPLE_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-      APPLE_ID: ${{ vars.APPLE_ID }}
-      MACOS_SIGNING_KEY: ${{ secrets.MACOS_SIGNING_KEY }}
-      MACOS_SIGNING_KEY_PASSWORD: ${{ secrets.MACOS_SIGNING_KEY_PASSWORD }}
-      CGO_CFLAGS: '-mmacosx-version-min=14.0 -O3'
-      CGO_CXXFLAGS: '-mmacosx-version-min=14.0 -O3'
-      CGO_LDFLAGS: '-mmacosx-version-min=14.0 -O3'
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          echo $MACOS_SIGNING_KEY | base64 --decode > certificate.p12
-          security create-keychain -p password build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p password build.keychain
-          security import certificate.p12 -k build.keychain -P $MACOS_SIGNING_KEY_PASSWORD -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k password build.keychain
-          security set-keychain-settings -lut 3600 build.keychain
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            LLAMA_CPP_VERSION
-            MLX_VERSION
-            MLX_C_VERSION
-      - run: |
-          ./scripts/build_darwin.sh
-      - name: Log build results
-        run: |
-          ls -l dist/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bundles-darwin
-          path: |
-            dist/*.tgz
-            dist/*.tar.zst
-            dist/*.zip
-            dist/*.dmg
-
   windows-depends:
     needs: setup-environment
     strategy:
@@ -695,7 +647,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     environment: release
-    needs: [darwin-build, windows-app, docker-build-push]
+    needs: [windows-app, docker-build-push]
     permissions:
       contents: write
     env:
