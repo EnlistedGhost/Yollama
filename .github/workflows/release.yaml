@@ -1,9 +1,20 @@
-name: release
+name: Release
 
 on:
+  workflow_dispatch: # allows manual triggering
+    inputs:
+      create_release:
+        description: 'Create new release'
+        required: true
+        type: boolean
   push:
-    tags:
-      - 'v*'
+    branches:
+      - master
+    paths: ['.github/workflows/release.yml', '**/CMakeLists.txt', '**/.cmake', '**/*.h', '**/*.hpp', '**/*.c', '**/*.cpp', '**/*.cu', '**/*.cuh', '**/*.swift', '**/*.m', '**/*.metal', '**/*.comp']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 env:
   CGO_CFLAGS: '-O3'
