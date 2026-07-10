@@ -1367,6 +1367,9 @@ func (s *llamaServerRunner) Completion(ctx context.Context, req CompletionReques
 			if len(line) == 0 {
 				continue
 			}
+			if bytes.HasPrefix(line, []byte(":")) {
+				continue
+			}
 
 			evt, ok := bytes.CutPrefix(line, []byte("data: "))
 			if !ok {
@@ -1652,6 +1655,9 @@ func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(C
 		default:
 			line := scanner.Bytes()
 			if len(line) == 0 {
+				continue
+			}
+			if bytes.HasPrefix(line, []byte(":")) {
 				continue
 			}
 
