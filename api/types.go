@@ -792,36 +792,9 @@ type ProgressResponse struct {
 	Completed int64  `json:"completed,omitempty"`
 }
 
-// PushRequest is the request passed to [Client.Push].
-type PushRequest struct {
-	Model    string `json:"model"`
-	Insecure bool   `json:"insecure,omitempty"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Stream   *bool  `json:"stream,omitempty"`
-
-	// Deprecated: set the model name with Model instead
-	Name string `json:"name"`
-}
-
 // ListResponse is the response from [Client.List].
 type ListResponse struct {
 	Models []ListModelResponse `json:"models"`
-}
-
-// ModelRecommendationsResponse is the response from [Client.ModelRecommendationsExperimental].
-type ModelRecommendationsResponse struct {
-	Recommendations []ModelRecommendation `json:"recommendations"`
-}
-
-// ModelRecommendation is a single recommendation entry in [ModelRecommendationsResponse].
-type ModelRecommendation struct {
-	Model           string `json:"model"`
-	Description     string `json:"description"`
-	ContextLength   int    `json:"context_length,omitempty"`
-	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
-	VRAMBytes       int64  `json:"vram_bytes,omitempty"`
-	RequiredPlan    string `json:"required_plan,omitempty"`
 }
 
 // ProcessResponse is the response from [Client.Process].

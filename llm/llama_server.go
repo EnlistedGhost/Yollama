@@ -322,20 +322,22 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		"--model", launch.modelPath,
 		"--port", strconv.Itoa(port),
 		"--host", "127.0.0.1",
-		"--cache-ram", "0",
+		"--cache-ram", "8192",
 		"--no-webui",
 		"--offline",
 		"--no-warmup",
 		"--no-repack",
-		"--spec-draft-n-max", "0",
-		"--swa-checkpoints", "0",
+		"--spec-draft-n-max", "0",// Fuck drafting
+		//"--swa-checkpoints", "0",
+		"--ctx-checkpoints", "32",// Keep context tokens cached for fast reply (Theta doesn't need to reload each time that's dumb)
 		"--reasoning-budget", "-1",
 		"--predict", "-1",
 		"--keep", "0",
 		"--cache-reuse", "0",
-		"--no-cache-prompt",
+		"--no-cache-prompt",// DO NOT cache prompt, that's bullshit to reuse my prompts (our prompts)
 		"--log-colors", "on",
-		"--no-kv-unified",
+		//"--no-kv-unified",
+		"--kv-unified",// need unified for context caching
 		"--no-context-shift",
 		"--sleep-idle-seconds", "-1",
 		"--slot-prompt-similarity", "0.0",

@@ -907,13 +907,13 @@ func quantizeLayer(layer *layerGGML, quantizeType string, fn func(resp api.Progr
 }
 
 func copyLayerWithLlamaQuantize(layer *layerGGML, fn func(resp api.ProgressResponse)) (*layerGGML, error) {
-	newLayer, err := rewriteLayerWithLlamaQuantize(layer, "COPY", fn, func(in, out *os.File, progressFn func(uint64)) error {
-		return copyGGUFWithLlamaQuantize(in, out, layer.GGML, progressFn)
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to validate GGUF with llama-quantize without compatibility patches: %w", err)
-	}
-	return newLayer, nil
+	//newLayer, err := rewriteLayerWithLlamaQuantize(layer, "COPY", fn, func(in, out *os.File, progressFn func(uint64)) error {
+	//	return copyGGUFWithLlamaQuantize(in, out, layer.GGML, progressFn)
+	//})
+	//if err != nil {
+	//	return nil, fmt.Errorf("failed to validate GGUF with llama-quantize without compatibility patches: %w", err)
+	//}
+	return layer, nil
 }
 
 func copySplitLayerPreservingTensors(layer *layerGGML) (*layerGGML, error) {

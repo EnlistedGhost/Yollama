@@ -250,7 +250,7 @@ func (s *Scheduler) processPending(ctx context.Context) {
 				} else if pending.schedAttempts > 1 {
 					slog.Debug("queued runner found, unloading now scheduled for current runner!")
 					// Trigger an expiration to unload once it's done
-					runnerToExpire.refMu.Lock()
+					runnerToExpire = s.findRunnerToUnload()
 					slog.Debug("setting current runner to expire immediately for queued runner", "runner", runnerToExpire, "refCount", runnerToExpire.refCount)
 					if runnerToExpire.expireTimer != nil {
 						runnerToExpire.expireTimer.Stop()
@@ -500,7 +500,7 @@ func getPathBatchNumConfig() (string, error) {
 	ollamaPath := filepath.Join(homeUserDir, ".ollama")
 	fmt.Println("Xllama directory:", ollamaPath)
 	
-	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "ollamaloader.json")
+	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "ollamaloader.conf")
 	return pathSchedBatchNumConfig, err
 }
 
@@ -1146,7 +1146,7 @@ func (s *Scheduler) applyLlamaServerMmapDefaults(req *LlmRequest, launchOpts api
 	if reason := disableMmapDefaultReason(runtime.GOOS, req.opts, gpus, f.KV().BlockCount(), predictedVRAM, availableVRAM); reason != "" {
 		useMmap := false
 		req.opts.UseMMap = &useMmap
-		req.useMMapAuto = true
+		req.useMMapAuto = false
 		slog.Info("disabling mmap for llama-server load by default",
 			"model", req.model.ModelPath,
 			"reason", reason)
@@ -1214,7 +1214,7 @@ func (s *Scheduler) maybeDisableMmapForHostPressure(req *LlmRequest, launchOpts 
 
 	useMmap := false
 	req.opts.UseMMap = &useMmap
-	req.useMMapAuto = true
+	req.useMMapAuto = false
 	slog.Info("disabling mmap for llama-server load due to host memory pressure",
 		"model", req.model.ModelPath,
 		"model_size", format.HumanBytes2(modelSize),

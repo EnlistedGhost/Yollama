@@ -1104,61 +1104,6 @@ func (s *Server) PullHandler(c *gin.Context) {
 	streamResponse(c, ch)
 }
 
-func (s *Server) PushHandler(c *gin.Context) {
-	var req api.PushRequest
-	err := c.ShouldBindJSON(&req)
-	switch {
-	case errors.Is(err, io.EOF):
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
-		return
-	case err != nil:
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	var mname string
-	if req.Model != "" {
-		mname = req.Model
-	} else if req.Name != "" {
-		mname = req.Name
-	} else {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
-		return
-	}
-
-	ch := make(chan any)
-	go func() {
-		defer close(ch)
-		fn := func(r api.ProgressResponse) {
-			ch <- r
-		}
-
-		regOpts := &registryOptions{
-			Insecure: req.Insecure,
-		}
-
-		ctx, cancel := context.WithCancel(c.Request.Context())
-		defer cancel()
-
-		name, err := getExistingName(model.ParseName(mname))
-		if err != nil {
-			ch <- gin.H{"error": err.Error()}
-			return
-		}
-
-		if err := PushModel(ctx, name.DisplayShortest(), regOpts, fn); err != nil {
-			ch <- gin.H{"error": err.Error()}
-		}
-	}()
-
-	if req.Stream != nil && !*req.Stream {
-		waitForStream(c, ch)
-		return
-	}
-
-	streamResponse(c, ch)
-}
-
 // getExistingName searches the models directory for the longest prefix match of
 // the input name and returns the input name with all existing parts replaced
 // with each part found. If no parts are found, the input name is returned as
@@ -1760,21 +1705,6 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 		"User-Agent",
 		"Accept",
 		"X-Requested-With",
-
-		// OpenAI compatibility headers
-		"OpenAI-Beta",
-		"x-stainless-arch",
-		"x-stainless-async",
-		"x-stainless-custom-poll-interval",
-		"x-stainless-helper-method",
-		"x-stainless-lang",
-		"x-stainless-os",
-		"x-stainless-package-version",
-		"x-stainless-poll-helper",
-		"x-stainless-retry-count",
-		"x-stainless-runtime",
-		"x-stainless-runtime-version",
-		"x-stainless-timeout",
 	}
 	corsConfig.AllowOrigins = envconfig.AllowedOrigins()
 
@@ -1785,25 +1715,18 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	)
 
 	// General
-	r.HEAD("/", func(c *gin.Context) { c.String(http.StatusOK, "Ollama is running") })
-	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "Ollama is running") })
+	r.HEAD("/", func(c *gin.Context) { c.String(http.StatusOK, "Xllama is running") })
+	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "Xllama is running") })
 	r.HEAD("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
 	r.GET("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
 	r.GET("/api/status", s.StatusHandler)
 
 	// Local model cache management (new implementation is at end of function)
 	r.POST("/api/pull", s.PullHandler)
-	r.POST("/api/push", s.PushHandler)
 	r.HEAD("/api/tags", s.ListHandler)
 	r.GET("/api/tags", s.ListHandler)
 	r.POST("/api/show", s.ShowHandler)
 	r.DELETE("/api/delete", s.DeleteHandler)
-
-	r.POST("/api/me", s.WhoamiHandler)
-
-	r.POST("/api/signout", s.SignoutHandler)
-	// deprecated
-	r.DELETE("/api/user/keys/:encodedKey", s.SignoutHandler)
 
 	// Create
 	r.POST("/api/create", s.CreateHandler)
@@ -1812,7 +1735,6 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	r.POST("/api/copy", s.CopyHandler)
 	r.POST("/api/experimental/web_search", s.WebSearchExperimentalHandler)
 	r.POST("/api/experimental/web_fetch", s.WebFetchExperimentalHandler)
-	//r.GET("/api/experimental/model-recommendations", s.ModelRecommendationsExperimentalHandler)
 
 	// Inference
 	r.GET("/api/ps", s.PsHandler)
@@ -2050,93 +1972,6 @@ func (s *Server) webExperimentalProxyHandler(c *gin.Context, proxyPath, disabled
 	}
 
 	proxyCloudRequestWithPath(c, body, proxyPath, disabledOperation)
-}
-
-func (s *Server) WhoamiHandler(c *gin.Context) {
-	// todo allow other hosts
-	u, err := url.Parse("https://ollama.com")
-	if err != nil {
-		slog.Error(err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "URL parse error"})
-		return
-	}
-
-	client := api.NewClient(u, http.DefaultClient)
-	user, err := client.Whoami(c)
-	if err != nil {
-		var authErr api.AuthorizationError
-		if errors.As(err, &authErr) && authErr.StatusCode == http.StatusUnauthorized {
-			// Preserve an actionable sign-in response for launch; other failures
-			// below mean account or plan verification is temporarily unavailable.
-			sURL := authErr.SigninURL
-			if sURL == "" {
-				var sErr error
-				sURL, sErr = signinURL()
-				if sErr != nil {
-					slog.Error(sErr.Error())
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "error getting authorization details"})
-					return
-				}
-			}
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized", "signin_url": sURL})
-			return
-		}
-
-		slog.Error(err.Error())
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "account unavailable"})
-		return
-	}
-
-	if user == nil || user.Name == "" {
-		sURL, sErr := signinURL()
-		if sErr != nil {
-			slog.Error(sErr.Error())
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "error getting authorization details"})
-			return
-		}
-
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized", "signin_url": sURL})
-		return
-	}
-
-	if strings.TrimSpace(user.Plan) == "" {
-		slog.Warn("account plan was not set; defaulting to free")
-		user.Plan = "free"
-	}
-	c.JSON(http.StatusOK, user)
-}
-
-func (s *Server) SignoutHandler(c *gin.Context) {
-	pubKey, err := auth.GetPublicKey()
-	if err != nil {
-		slog.Error("couldn't get public key", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "there was an error signing out"})
-		return
-	}
-
-	encKey := base64.RawURLEncoding.EncodeToString([]byte(pubKey))
-
-	// todo allow other hosts
-	u, err := url.Parse("https://ollama.com")
-	if err != nil {
-		slog.Error(err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "URL parse error"})
-		return
-	}
-
-	client := api.NewClient(u, http.DefaultClient)
-	err = client.Disconnect(c, encKey)
-	if err != nil {
-		var authError api.AuthorizationError
-		if errors.As(err, &authError) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "you are not currently signed in"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "there was an error signing out"})
-		return
-	}
-
-	c.JSON(http.StatusOK, nil)
 }
 
 func (s *Server) PsHandler(c *gin.Context) {

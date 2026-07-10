@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -723,73 +722,6 @@ func PruneLayers() error {
 	return nil
 }
 
-func PushModel(ctx context.Context, name string, regOpts *registryOptions, fn func(api.ProgressResponse)) error {
-	n := model.ParseName(name)
-	fn(api.ProgressResponse{Status: "retrieving manifest"})
-
-	if n.ProtocolScheme == "http" && !regOpts.Insecure {
-		return errInsecureProtocol
-	}
-
-	mf, err := manifest.ParseNamedManifest(n)
-	if err != nil {
-		fn(api.ProgressResponse{Status: "couldn't retrieve manifest"})
-		return err
-	}
-
-	var layers []manifest.Layer
-	layers = append(layers, mf.Layers...)
-	if mf.Config.Digest != "" {
-		layers = append(layers, mf.Config)
-	}
-
-	// Use fast transfer for models with tensor layers (many small blobs)
-	if hasTensorLayers(layers) {
-		// Read raw manifest JSON to preserve tensor metadata fields
-		manifestPath, err := manifest.PathForName(n)
-		if err != nil {
-			return err
-		}
-		manifestJSON, err := os.ReadFile(manifestPath)
-		if err != nil {
-			return err
-		}
-		if err := pushWithTransfer(ctx, n, layers, manifestJSON, regOpts, fn); err != nil {
-			return err
-		}
-		fn(api.ProgressResponse{Status: "success"})
-		return nil
-	}
-
-	for _, layer := range layers {
-		if err := uploadBlob(ctx, n, layer, regOpts, fn); err != nil {
-			slog.Info(fmt.Sprintf("error uploading blob: %v", err))
-			return err
-		}
-	}
-
-	fn(api.ProgressResponse{Status: "pushing manifest"})
-	requestURL := n.BaseURL()
-	requestURL = requestURL.JoinPath("v2", n.DisplayNamespaceModel(), "manifests", n.Tag)
-
-	manifestJSON, err := json.Marshal(mf)
-	if err != nil {
-		return err
-	}
-
-	headers := make(http.Header)
-	headers.Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
-	resp, err := makeRequestWithRetry(ctx, http.MethodPut, requestURL, headers, bytes.NewReader(manifestJSON), regOpts)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	fn(api.ProgressResponse{Status: "success"})
-
-	return nil
-}
-
 func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn func(api.ProgressResponse)) error {
 	n := model.ParseName(name)
 
@@ -988,65 +920,6 @@ func pullWithTransfer(ctx context.Context, n model.Name, layers []manifest.Layer
 
 	slog.Debug("manifest written", "path", fp, "sha256", fmt.Sprintf("%x", sha256.Sum256(manifestData)), "size", len(manifestData))
 	return nil
-}
-
-// pushWithTransfer uses the simplified x/transfer package for uploading blobs and manifest.
-func pushWithTransfer(ctx context.Context, n model.Name, layers []manifest.Layer, manifestJSON []byte, regOpts *registryOptions, fn func(api.ProgressResponse)) error {
-	blobs := make([]transfer.Blob, len(layers))
-	for i, layer := range layers {
-		blobs[i] = transfer.Blob{
-			Digest: layer.Digest,
-			Size:   layer.Size,
-			From:   layer.From,
-		}
-	}
-
-	srcDir, err := manifest.BlobsPath("")
-	if err != nil {
-		return err
-	}
-
-	base := n.BaseURL()
-	if base.Scheme != "http" && regOpts != nil && regOpts.Insecure {
-		base.Scheme = "http"
-	}
-	baseURL := base.String()
-
-	var totalSize int64
-	for _, blob := range blobs {
-		totalSize += blob.Size
-	}
-
-	progress := func(completed, total int64) {
-		fn(api.ProgressResponse{
-			Status:    "pushing model",
-			Digest:    "sha256:model",
-			Total:     total,
-			Completed: completed,
-		})
-	}
-
-	getToken := func(ctx context.Context, challenge transfer.AuthChallenge) (string, error) {
-		return getAuthorizationToken(ctx, registryChallenge{
-			Realm:   challenge.Realm,
-			Service: challenge.Service,
-			Scope:   challenge.Scope,
-		}, base.Host)
-	}
-
-	return transfer.Upload(ctx, transfer.UploadOptions{
-		Blobs:           blobs,
-		BaseURL:         baseURL,
-		SrcDir:          srcDir,
-		BodyConcurrency: max(1, int(envconfig.MaxTransferStreams())),
-		Progress:        progress,
-		Token:           regOpts.Token,
-		GetToken:        getToken,
-		Logger:          slog.Default(),
-		Manifest:        manifestJSON,
-		ManifestRef:     n.Tag,
-		Repository:      n.DisplayNamespaceModel(),
-	})
 }
 
 func pullModelManifest(ctx context.Context, n model.Name, regOpts *registryOptions) (*manifest.Manifest, []byte, error) {

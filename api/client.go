@@ -324,25 +324,6 @@ func (c *Client) Pull(ctx context.Context, req *PullRequest, fn PullProgressFunc
 	})
 }
 
-// PushProgressFunc is a function that [Client.Push] invokes when progress is
-// made.
-// It's similar to other progress function types like [PullProgressFunc].
-type PushProgressFunc func(ProgressResponse) error
-
-// Push uploads a model to the model library; requires registering for ollama.ai
-// and adding a public key first. fn is called each time progress is made on
-// the request and can be used to display a progress bar, etc.
-func (c *Client) Push(ctx context.Context, req *PushRequest, fn PushProgressFunc) error {
-	return c.stream(ctx, http.MethodPost, "/api/push", req, func(bts []byte) error {
-		var resp ProgressResponse
-		if err := json.Unmarshal(bts, &resp); err != nil {
-			return err
-		}
-
-		return fn(resp)
-	})
-}
-
 // CreateProgressFunc is a function that [Client.Create] invokes when progress
 // is made.
 // It's similar to other progress function types like [PullProgressFunc].
@@ -370,16 +351,6 @@ func (c *Client) List(ctx context.Context) (*ListResponse, error) {
 		return nil, err
 	}
 	return &lr, nil
-}
-
-// ModelRecommendationsExperimental lists model recommendations from the local
-// server's experimental recommendations endpoint.
-func (c *Client) ModelRecommendationsExperimental(ctx context.Context) (*ModelRecommendationsResponse, error) {
-	var resp ModelRecommendationsResponse
-	if err := c.do(ctx, http.MethodGet, "/api/experimental/model-recommendations", nil, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
 }
 
 // ListRunning lists running models.

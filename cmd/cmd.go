@@ -32,16 +32,12 @@ import (
 	"github.com/containerd/console"
 	"github.com/mattn/go-runewidth"
 	"github.com/olekukonko/tablewriter"
-	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 
 	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/cmd/config"
-	"github.com/ollama/ollama/cmd/launch"
-	"github.com/ollama/ollama/cmd/tui"
 	"github.com/ollama/ollama/discover"
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/format"
@@ -60,81 +56,6 @@ import (
 	xcreateclient "github.com/ollama/ollama/x/create/client"
 	"github.com/ollama/ollama/x/imagegen"
 )
-
-func init() {
-	// Override default selectors to use Bubbletea TUI instead of raw terminal I/O.
-	launch.DefaultSingleSelector = func(title string, items []launch.SelectionItem, current string) (string, error) {
-		return runTUISingleSelector(title, items, current, nil)
-	}
-
-	launch.DefaultSingleSelectorWithUpdates = func(title string, items []launch.SelectionItem, current string, updates <-chan []launch.SelectionItem) (string, error) {
-		return runTUISingleSelector(title, items, current, updates)
-	}
-
-	launch.DefaultMultiSelector = func(title string, items []launch.SelectionItem, preChecked []string) ([]string, error) {
-		return runTUIMultiSelector(title, items, preChecked, nil)
-	}
-
-	launch.DefaultMultiSelectorWithUpdates = func(title string, items []launch.SelectionItem, preChecked []string, updates <-chan []launch.SelectionItem) ([]string, error) {
-		return runTUIMultiSelector(title, items, preChecked, updates)
-	}
-
-	launch.DefaultSignIn = func(modelName, signInURL string) (string, error) {
-		userName, err := tui.RunSignIn(modelName, signInURL)
-		if errors.Is(err, tui.ErrCancelled) {
-			return "", launch.ErrCancelled
-		}
-		return userName, err
-	}
-
-	launch.DefaultUpgrade = func(modelName, requiredPlan string) (string, error) {
-		plan, err := tui.RunUpgrade(modelName, requiredPlan)
-		if errors.Is(err, tui.ErrCancelled) {
-			return "", launch.ErrCancelled
-		}
-		return plan, err
-	}
-
-	launch.DefaultConfirmPrompt = tui.RunConfirmWithOptions
-}
-
-func runTUISingleSelector(title string, items []launch.SelectionItem, current string, updates <-chan []launch.SelectionItem) (string, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return "", fmt.Errorf("model selection requires an interactive terminal; use --model to run in headless mode")
-	}
-	tuiItems := tui.ReorderItems(tui.ConvertItems(items))
-	result, err := tui.SelectSingleWithUpdates(title, tuiItems, current, convertSelectionItemUpdates(updates))
-	if errors.Is(err, tui.ErrCancelled) {
-		return "", launch.ErrCancelled
-	}
-	return result, err
-}
-
-func runTUIMultiSelector(title string, items []launch.SelectionItem, preChecked []string, updates <-chan []launch.SelectionItem) ([]string, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return nil, fmt.Errorf("model selection requires an interactive terminal; use --model to run in headless mode")
-	}
-	tuiItems := tui.ReorderItems(tui.ConvertItems(items))
-	result, err := tui.SelectMultipleWithUpdates(title, tuiItems, preChecked, convertSelectionItemUpdates(updates))
-	if errors.Is(err, tui.ErrCancelled) {
-		return nil, launch.ErrCancelled
-	}
-	return result, err
-}
-
-func convertSelectionItemUpdates(updates <-chan []launch.SelectionItem) <-chan []tui.SelectItem {
-	if updates == nil {
-		return nil
-	}
-	out := make(chan []tui.SelectItem, 1)
-	go func() {
-		defer close(out)
-		for items := range updates {
-			out <- tui.ReorderItems(tui.ConvertItems(items))
-		}
-	}()
-	return out
-}
 
 const ConnectInstructions = "If your browser did not open, navigate to:\n    %s\n\n"
 
@@ -599,6 +520,7 @@ func loadOrUnloadModel(cmd *cobra.Command, opts *runOptions) error {
 	})
 }
 
+// TODO: wire up this stop handler to API
 func StopHandler(cmd *cobra.Command, args []string) error {
 	opts := &runOptions{
 		Model:     args[0],
@@ -929,154 +851,6 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
-	return nil
-}
-
-func SigninHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	user, err := client.Whoami(cmd.Context())
-	if err != nil {
-		var aErr api.AuthorizationError
-		if errors.As(err, &aErr) && aErr.StatusCode == http.StatusUnauthorized {
-			fmt.Println("You need to be signed in to Ollama to run Cloud models.")
-			fmt.Println()
-
-			if aErr.SigninURL != "" {
-				_ = browser.OpenURL(aErr.SigninURL)
-				fmt.Printf(ConnectInstructions, aErr.SigninURL)
-			}
-			return nil
-		}
-		return err
-	}
-
-	if user != nil && user.Name != "" {
-		fmt.Printf("You are already signed in as user '%s'\n", user.Name)
-		fmt.Println()
-		return nil
-	}
-
-	return nil
-}
-
-func SignoutHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	err = client.Signout(cmd.Context())
-	if err != nil {
-		var aErr api.AuthorizationError
-		if errors.As(err, &aErr) && aErr.StatusCode == http.StatusUnauthorized {
-			fmt.Println("You are not signed in to ollama.com")
-			fmt.Println()
-			return nil
-		} else {
-			return err
-		}
-	}
-
-	fmt.Println("You have signed out of ollama.com")
-	fmt.Println()
-	return nil
-}
-
-func PushHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	insecure, err := cmd.Flags().GetBool("insecure")
-	if err != nil {
-		return err
-	}
-
-	n := model.ParseName(args[0])
-	if strings.HasSuffix(n.Host, ".ollama.ai") || strings.HasSuffix(n.Host, ".ollama.com") {
-		_, err := client.Whoami(cmd.Context())
-		if err != nil {
-			var aErr api.AuthorizationError
-			if errors.As(err, &aErr) && aErr.StatusCode == http.StatusUnauthorized {
-				fmt.Println("You need to be signed in to push models to ollama.com.")
-				fmt.Println()
-
-				if aErr.SigninURL != "" {
-					fmt.Printf(ConnectInstructions, aErr.SigninURL)
-				}
-				return nil
-			}
-
-			return err
-		}
-	}
-
-	p := progress.NewProgress(os.Stderr)
-	defer p.Stop()
-
-	bars := make(map[string]*progress.Bar)
-	var status string
-	var spinner *progress.Spinner
-
-	fn := func(resp api.ProgressResponse) error {
-		if resp.Digest != "" {
-			if spinner != nil {
-				spinner.Stop()
-			}
-
-			bar, ok := bars[resp.Digest]
-			if !ok {
-				msg := resp.Status
-				if msg == "" {
-					msg = fmt.Sprintf("pushing %s...", resp.Digest[7:19])
-				}
-				bar = progress.NewBar(msg, resp.Total, resp.Completed)
-				bars[resp.Digest] = bar
-				p.Add(resp.Digest, bar)
-			}
-
-			bar.Set(resp.Completed)
-		} else if status != resp.Status {
-			if spinner != nil {
-				spinner.Stop()
-			}
-
-			status = resp.Status
-			spinner = progress.NewSpinner(status)
-			p.Add(status, spinner)
-		}
-
-		return nil
-	}
-
-	request := api.PushRequest{Name: args[0], Insecure: insecure}
-
-	if err := client.Push(cmd.Context(), &request, fn); err != nil {
-		if spinner != nil {
-			spinner.Stop()
-		}
-		errStr := strings.ToLower(err.Error())
-		if strings.Contains(errStr, "access denied") || strings.Contains(errStr, "unauthorized") {
-			return errors.New("you are not authorized to push to this namespace, create the model under a namespace you own")
-		}
-		return err
-	}
-
-	p.Stop()
-	spinner.Stop()
-
-	destination := n.String()
-	if strings.HasSuffix(n.Host, ".ollama.ai") || strings.HasSuffix(n.Host, ".ollama.com") {
-		destination = "https://ollama.com/" + strings.TrimSuffix(n.DisplayShortest(), ":latest")
-	}
-	fmt.Printf("\nYou can find your model at:\n\n")
-	fmt.Printf("\t%s\n", destination)
-
 	return nil
 }
 
@@ -2213,124 +1987,6 @@ func launchInteractiveModel(cmd *cobra.Command, modelName string) error {
 	return nil
 }
 
-// runInteractiveTUI runs the main interactive TUI menu.
-func runInteractiveTUI(cmd *cobra.Command) {
-	// Ensure the server is running before showing the TUI
-	if err := ensureServerRunning(cmd.Context()); err != nil {
-		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
-		return
-	}
-
-	accountPrefetch := launch.StartAccountStatePrefetch(cmd.Context())
-	deps := launcherDeps{
-		buildState:          launch.BuildLauncherState,
-		runMenu:             tui.RunMenu,
-		resolveRunModel:     launch.ResolveRunModel,
-		launchIntegration:   launch.LaunchIntegration,
-		runModel:            launchInteractiveModel,
-		accountState:        accountPrefetch.StateIfReady,
-		accountStateUpdates: accountPrefetch.StateUpdates,
-	}
-
-	for {
-		continueLoop, err := runInteractiveTUIStep(cmd, deps)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		if !continueLoop {
-			return
-		}
-	}
-}
-
-type launcherDeps struct {
-	buildState          func(context.Context) (*launch.LauncherState, error)
-	runMenu             func(*launch.LauncherState) (tui.TUIAction, error)
-	resolveRunModel     func(context.Context, launch.RunModelRequest) (string, error)
-	launchIntegration   func(context.Context, launch.IntegrationLaunchRequest) error
-	runModel            func(*cobra.Command, string) error
-	accountState        func() *launch.AccountState
-	accountStateUpdates func(context.Context) <-chan *launch.AccountState
-}
-
-func runInteractiveTUIStep(cmd *cobra.Command, deps launcherDeps) (bool, error) {
-	state, err := deps.buildState(cmd.Context())
-	if err != nil {
-		return false, fmt.Errorf("build launcher state: %w", err)
-	}
-	if state != nil && deps.accountState != nil {
-		state.AccountState = deps.accountState()
-	}
-
-	action, err := deps.runMenu(state)
-	if err != nil {
-		return false, fmt.Errorf("run launcher menu: %w", err)
-	}
-
-	return runLauncherAction(cmd, action, deps)
-}
-
-func saveLauncherSelection(action tui.TUIAction) {
-	// Best effort only: this affects menu recall, not launch correctness.
-	_ = config.SetLastSelection(action.LastSelection())
-}
-
-func runLauncherAction(cmd *cobra.Command, action tui.TUIAction, deps launcherDeps) (bool, error) {
-	switch action.Kind {
-	case tui.TUIActionNone:
-		return false, nil
-	case tui.TUIActionRunModel:
-		saveLauncherSelection(action)
-		req := action.RunModelRequest()
-		if deps.accountState != nil {
-			req.AccountState = deps.accountState()
-			req.AccountStateProvider = deps.accountState
-		}
-		req.AccountStateUpdates = deps.accountStateUpdates
-		modelName, err := deps.resolveRunModel(cmd.Context(), req)
-		if errors.Is(err, launch.ErrCancelled) {
-			return true, nil
-		}
-		if err != nil {
-			return true, fmt.Errorf("selecting model: %w", err)
-		}
-		if err := deps.runModel(cmd, modelName); err != nil {
-			return true, err
-		}
-		return true, nil
-	case tui.TUIActionLaunchIntegration:
-		saveLauncherSelection(action)
-		req := action.IntegrationLaunchRequest()
-		if deps.accountState != nil {
-			req.AccountState = deps.accountState()
-			req.AccountStateProvider = deps.accountState
-		}
-		req.AccountStateUpdates = deps.accountStateUpdates
-		err := deps.launchIntegration(cmd.Context(), req)
-		if errors.Is(err, launch.ErrCancelled) {
-			return true, nil
-		}
-		if err != nil {
-			return true, fmt.Errorf("launching %s: %w", action.Integration, err)
-		}
-		if launcherActionExitsLoop(action.Integration) {
-			return false, nil
-		}
-		return true, nil
-	default:
-		return false, fmt.Errorf("unknown launcher action: %d", action.Kind)
-	}
-}
-
-func launcherActionExitsLoop(integration string) bool {
-	switch integration {
-	case "codex-app", "vscode":
-		return true
-	default:
-		return false
-	}
-}
-
 func NewCLI() *cobra.Command {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	cobra.EnableCommandSorting = false
@@ -2352,8 +2008,6 @@ func NewCLI() *cobra.Command {
 				versionHandler(cmd, args)
 				return
 			}
-
-			runInteractiveTUI(cmd)
 		},
 	}
 
@@ -2449,50 +2103,6 @@ func NewCLI() *cobra.Command {
 
 	pullCmd.Flags().Bool("insecure", false, "Use an insecure registry")
 
-	pushCmd := &cobra.Command{
-		Use:     "push MODEL",
-		Short:   "Push a model to a registry",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    PushHandler,
-	}
-
-	pushCmd.Flags().Bool("insecure", false, "Use an insecure registry")
-
-	signinCmd := &cobra.Command{
-		Use:     "signin",
-		Short:   "Sign in to ollama.com",
-		Args:    cobra.ExactArgs(0),
-		PreRunE: checkServerHeartbeat,
-		RunE:    SigninHandler,
-	}
-
-	loginCmd := &cobra.Command{
-		Use:     "login",
-		Short:   "Sign in to ollama.com",
-		Hidden:  true,
-		Args:    cobra.ExactArgs(0),
-		PreRunE: checkServerHeartbeat,
-		RunE:    SigninHandler,
-	}
-
-	signoutCmd := &cobra.Command{
-		Use:     "signout",
-		Short:   "Sign out from ollama.com",
-		Args:    cobra.ExactArgs(0),
-		PreRunE: checkServerHeartbeat,
-		RunE:    SignoutHandler,
-	}
-
-	logoutCmd := &cobra.Command{
-		Use:     "logout",
-		Short:   "Sign out from ollama.com",
-		Hidden:  true,
-		Args:    cobra.ExactArgs(0),
-		PreRunE: checkServerHeartbeat,
-		RunE:    SignoutHandler,
-	}
-
 	listCmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
@@ -2555,7 +2165,6 @@ func NewCLI() *cobra.Command {
 		runCmd,
 		stopCmd,
 		pullCmd,
-		pushCmd,
 		listCmd,
 		psCmd,
 		copyCmd,
@@ -2602,18 +2211,12 @@ func NewCLI() *cobra.Command {
 		runCmd,
 		stopCmd,
 		pullCmd,
-		pushCmd,
-		signinCmd,
-		loginCmd,
-		signoutCmd,
-		logoutCmd,
 		listCmd,
 		psCmd,
 		copyCmd,
 		deleteCmd,
 		runnerCmd,
 		gpuDiscoverCmd,
-		launch.LaunchCmd(checkServerHeartbeat, runInteractiveTUI),
 	)
 
 	return rootCmd
