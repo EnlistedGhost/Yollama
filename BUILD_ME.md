@@ -12,3 +12,7 @@ export GOMAXPROCS=4
 go clean -cache
 go generate ./...
 go build -o ollama .
+
+---- or ----
+
+cd ~/Builds/ollama-SRC-0.30.0-rc29/; export PATH=$PATH:/usr/local/cuda/bin; export PATH=~/Builds/go-1.24.13-toolchain/go/bin/:$PATH; export MAKEFLAGS="-j2 -fno-aggressive-loop-optimizations"; export GOMAXPROCS=2; go clean -cache; go generate ./...; go build -o ollama-cjz_0_30_0_xc29-linux-amd64 .

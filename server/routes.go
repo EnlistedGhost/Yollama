@@ -43,8 +43,6 @@ import (
 	"github.com/ollama/ollama/manifest"
 	"github.com/ollama/ollama/model/parsers"
 	"github.com/ollama/ollama/model/renderers"
-	"github.com/ollama/ollama/server/internal/client/ollama"
-	"github.com/ollama/ollama/server/internal/registry"
 	"github.com/ollama/ollama/template"
 	"github.com/ollama/ollama/thinking"
 	"github.com/ollama/ollama/tools"
@@ -1752,7 +1750,7 @@ func allowedHost(host string) bool {
 	return false
 }
 
-func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
+func (s *Server) GenerateRoutes() (http.Handler, error) {
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowWildcard = true
 	corsConfig.AllowBrowserExtensions = true
@@ -1827,18 +1825,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.POST("/api/stop", s.StopModelHandler)
 	r.POST("/api/stop/all", s.StopAllModelsHandler)
 
-	if rc != nil {
-		// wrap old with new
-		rs := &registry.Local{
-			Client:   rc,
-			Logger:   slog.Default(),
-			Fallback: r,
-
-			Prune: PruneLayers,
-		}
-		return rs, nil
-	}
-
 	return r, nil
 }
 
@@ -1884,16 +1870,11 @@ func Serve(ln net.Listener) error {
 		return err
 	}
 
-	var rc *ollama.Registry
 	if useClient2 {
-		var err error
-		rc, err = ollama.DefaultRegistry()
-		if err != nil {
-			return err
-		}
+		slog.Warn("Xllama does not use client2 experimental systems")
 	}
 
-	h, err := s.GenerateRoutes(rc)
+	h, err := s.GenerateRoutes()
 	if err != nil {
 		return err
 	}
