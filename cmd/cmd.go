@@ -42,7 +42,6 @@ import (
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/internal/modelref"
-	"github.com/ollama/ollama/logutil"
 	"github.com/ollama/ollama/parser"
 	"github.com/ollama/ollama/progress"
 	"github.com/ollama/ollama/readline"
@@ -475,33 +474,16 @@ func loadOrUnloadModel(cmd *cobra.Command, opts *runOptions) error {
 		return err
 	}
 
-	requestedCloud := modelref.HasExplicitCloudSource(opts.Model)
-
 	if info, err := client.Show(cmd.Context(), &api.ShowRequest{Model: opts.Model}); err != nil {
 		return err
-	} else if info.RemoteHost != "" || requestedCloud {
-		// Cloud model, no need to load/unload
-
-		isCloud := requestedCloud || strings.HasPrefix(info.RemoteHost, "https://ollama.com")
-
-		// Check if user is signed in for ollama.com cloud models
-		if isCloud {
-			if _, err := client.Whoami(cmd.Context()); err != nil {
-				return err
-			}
-		}
-
+	} else if info.RemoteHost != "" {
 		if opts.ShowConnect {
 			p.StopAndClear()
 			remoteModel := info.RemoteModel
 			if remoteModel == "" {
 				remoteModel = opts.Model
 			}
-			if isCloud {
-				fmt.Fprintf(os.Stderr, "Connecting to '%s' on 'ollama.com' ⚡\n", remoteModel)
-			} else {
-				fmt.Fprintf(os.Stderr, "Connecting to '%s' on '%s'\n", remoteModel, info.RemoteHost)
-			}
+			fmt.Fprintf(os.Stderr, "Connecting to '%s' on '%s'\n", remoteModel, info.RemoteHost)
 		}
 
 		return nil
@@ -573,28 +555,11 @@ func generateEmbedding(cmd *cobra.Command, modelName, input string, keepAlive *a
 	return nil
 }
 
-// TODO(parthsareen): consolidate with TUI signin flow
-func handleCloudAuthorizationError(err error) bool {
-	var authErr api.AuthorizationError
-	if errors.As(err, &authErr) && authErr.StatusCode == http.StatusUnauthorized {
-		fmt.Printf("You need to be signed in to Ollama to run Cloud models.\n\n")
-		if authErr.SigninURL != "" {
-			fmt.Printf(ConnectInstructions, authErr.SigninURL)
-		}
-		return true
-	}
-
+func handlePullUnAuthorizedError(err error) bool {
 	return false
 }
 
-// TEMP(drifkin): To match legacy `ollama run some-model:cloud` behavior, we
-// best-effort pull cloud stub files for any explicit cloud source models.
-// Remove this once `/api/tags` is cloud-aware.
-func ensureCloudStub(ctx context.Context, client *api.Client, modelName string) {
-	if !modelref.HasExplicitCloudSource(modelName) {
-		return
-	}
-
+func ensureRemotePullStub(ctx context.Context, client *api.Client, modelName string) {
 	normalizedName, _, err := modelref.NormalizePullName(modelName)
 	if err != nil {
 		slog.Warn("failed to normalize pull name", "model", modelName, "error", err, "normalizedName", normalizedName)
@@ -611,15 +576,11 @@ func ensureCloudStub(ctx context.Context, client *api.Client, modelName string) 
 		return
 	}
 
-	logutil.Trace("pulling cloud stub", "model", modelName, "normalizedName", normalizedName)
 	err = client.Pull(ctx, &api.PullRequest{
 		Model: normalizedName,
 	}, func(api.ProgressResponse) error {
 		return nil
 	})
-	if err != nil {
-		slog.Warn("failed to pull cloud stub", "model", modelName, "error", err)
-	}
 }
 
 func hasListedModelName(models []api.ListModelResponse, name string) bool {
@@ -727,16 +688,12 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
-	requestedCloud := modelref.HasExplicitCloudSource(name)
 
 	info, err := func() (*api.ShowResponse, error) {
 		showReq := &api.ShowRequest{Name: name}
 		info, err := client.Show(cmd.Context(), showReq)
 		var se api.StatusError
 		if errors.As(err, &se) && se.StatusCode == http.StatusNotFound {
-			if requestedCloud {
-				return nil, err
-			}
 			if err := PullHandler(cmd, []string{name}); err != nil {
 				return nil, err
 			}
@@ -745,13 +702,11 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		return info, err
 	}()
 	if err != nil {
-		if handleCloudAuthorizationError(err) {
-			return nil
-		}
-		return err
+		return nil
 	}
 
-	ensureCloudStub(cmd.Context(), client, name)
+	// TODO: Remove after verifying level of importance
+	ensureRemotePullStub(cmd.Context(), client, name)
 
 	opts.Think, err = inferThinkingOption(&info.Capabilities, &opts, thinkFlag.Changed)
 	if err != nil {
@@ -816,11 +771,7 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		if err := loadOrUnloadModel(cmd, &opts); err != nil {
 			var sErr api.AuthorizationError
 			if errors.As(err, &sErr) && sErr.StatusCode == http.StatusUnauthorized {
-				fmt.Printf("You need to be signed in to Ollama to run Cloud models.\n\n")
-
-				if sErr.SigninURL != "" {
-					fmt.Printf(ConnectInstructions, sErr.SigninURL)
-				}
+				fmt.Printf("Xllama | Error - Unauthorized!\n\n")
 				return nil
 			}
 			return err
@@ -846,7 +797,7 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		return generateInteractive(cmd, opts)
 	}
 	if err := generate(cmd, opts); err != nil {
-		if handleCloudAuthorizationError(err) {
+		if handlePullUnAuthorizedError(err) {
 			return nil
 		}
 		return err
@@ -1929,16 +1880,11 @@ func launchInteractiveModel(cmd *cobra.Command, modelName string) error {
 		return err
 	}
 
-	requestedCloud := modelref.HasExplicitCloudSource(modelName)
-
 	info, err := func() (*api.ShowResponse, error) {
 		showReq := &api.ShowRequest{Name: modelName}
 		info, err := client.Show(cmd.Context(), showReq)
 		var se api.StatusError
 		if errors.As(err, &se) && se.StatusCode == http.StatusNotFound {
-			if requestedCloud {
-				return nil, err
-			}
 			if err := PullHandler(cmd, []string{modelName}); err != nil {
 				return nil, err
 			}
@@ -1947,13 +1893,13 @@ func launchInteractiveModel(cmd *cobra.Command, modelName string) error {
 		return info, err
 	}()
 	if err != nil {
-		if handleCloudAuthorizationError(err) {
+		if handlePullUnAuthorizedError(err) {
 			return nil
 		}
 		return err
 	}
 
-	ensureCloudStub(cmd.Context(), client, modelName)
+	ensureRemotePullStub(cmd.Context(), client, modelName)
 
 	opts.Think, err = inferThinkingOption(&info.Capabilities, &opts, false)
 	if err != nil {

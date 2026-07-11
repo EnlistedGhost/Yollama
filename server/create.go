@@ -907,11 +907,14 @@ func quantizeLayer(layer *layerGGML, quantizeType string, fn func(resp api.Progr
 }
 
 func copyLayerWithLlamaQuantize(layer *layerGGML, fn func(resp api.ProgressResponse)) (*layerGGML, error) {
+	// NOTE: For now, we bypass verification of layers and copy of new layers... 
+	// it's horribly slow and serves not purpose if the model is valid GGUF
+	//
 	//newLayer, err := rewriteLayerWithLlamaQuantize(layer, "COPY", fn, func(in, out *os.File, progressFn func(uint64)) error {
 	//	return copyGGUFWithLlamaQuantize(in, out, layer.GGML, progressFn)
 	//})
 	//if err != nil {
-	//	return nil, fmt.Errorf("failed to validate GGUF with llama-quantize without compatibility patches: %w", err)
+	//	return nil, fmt.Errorf("Xllama Error 44 - failure engaging llama-quantize compatibility newLayer copy: %w", err)
 	//}
 	return layer, nil
 }
