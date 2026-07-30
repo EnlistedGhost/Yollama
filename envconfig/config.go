@@ -27,13 +27,10 @@ func Host() *url.URL {
 	switch {
 	case !ok:
 		scheme, hostport = "http", s
-		if s == "ollama.com" {
-			scheme, hostport = "https", "ollama.com:443"
-		}
 	case scheme == "http":
-		defaultPort = "80"
+		defaultPort = "11434"
 	case scheme == "https":
-		defaultPort = "443"
+		defaultPort = "11434"
 	}
 
 	hostport, path, _ := strings.Cut(hostport, "/")
@@ -167,7 +164,7 @@ func Remotes() []string {
 	var r []string
 	raw := strings.TrimSpace(Var("OLLAMA_REMOTES"))
 	if raw == "" {
-		r = []string{"ollama.com"}
+		r = []string{"127.0.0.1"}
 	} else {
 		r = strings.Split(raw, ",")
 	}
@@ -335,7 +332,7 @@ func AsMap() map[string]EnvVar {
 		"OLLAMA_SCHED_SPREAD":         {"OLLAMA_SCHED_SPREAD", SchedSpread(), "Always schedule model across all GPUs"},
 		"OLLAMA_CONTEXT_LENGTH":       {"OLLAMA_CONTEXT_LENGTH", ContextLength(), "Context length to use unless otherwise specified (default: 4k/32k/256k based on VRAM)"},
 		"OLLAMA_EDITOR":               {"OLLAMA_EDITOR", Editor(), "Path to editor for interactive prompt editing (Ctrl+G)"},
-		"OLLAMA_REMOTES":              {"OLLAMA_REMOTES", Remotes(), "Allowed hosts for remote models (default \"ollama.com\")"},
+		"OLLAMA_REMOTES":              {"OLLAMA_REMOTES", Remotes(), "Allowed hosts for remote models (default \"127.0.0.1\")"},
 
 		// Informational
 		"HTTP_PROXY":  {"HTTP_PROXY", String("HTTP_PROXY")(), "HTTP proxy"},

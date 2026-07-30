@@ -357,10 +357,20 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		params = append(params, "--lora", adapter)
 	}
 
-	// UseMmap
+	// Do not UseMmap
 	//if launch.opts.UseMMap != nil && !*launch.opts.UseMMap {
 		params = append(params, "--no-mmap")
 	//}
+
+
+	// Direct I/O skips the page cache on load for integrated CUDA/ROCm GPUs, which
+	// share system memory with the CPU and would otherwise double-buffer weights.
+	for _, g := range launch.gpus {
+		if runtime.GOOS == "linux" && g.Integrated && (strings.EqualFold(g.Library, "CUDA") || strings.EqualFold(g.Library, "ROCm")) {
+			params = append(params, "--direct-io")
+			break
+		}
+	}
 
 	// KV cache type
 	if launch.kvCacheType != "" {
