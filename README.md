@@ -1,6 +1,6 @@
 <p align="center">
-  <a href="[Xllama](https://github.com/EnlistedGhost/Xllama)">
-    <img src="https://github.com/xllama/xllama/assets/" alt="Xllama" width="256"/>
+  <a href="[Yollama](https://github.com/EnlistedGhost/Yollama)">
+    <img src="https://github.com/Yollama/yollama/assets/" alt="Yollama" width="256"/>
   </a>
 </p>
 
