@@ -53,7 +53,7 @@ func defaultBlobDir() string {
 
 // resolveManifestPath converts a model name to a manifest file path.
 func resolveManifestPath(modelName string) string {
-	host := "registry.ollama.ai"
+	host := "registry.yollama.ai"
 	namespace := "library"
 	name := modelName
 	tag := "latest"
@@ -157,7 +157,7 @@ func GetModelArchitecture(modelName string) (string, error) {
 
 	// Find the config.json layer
 	for _, layer := range manifest.Layers {
-		if layer.Name == "config.json" && layer.MediaType == "application/vnd.ollama.image.json" {
+		if layer.Name == "config.json" && layer.MediaType == "application/vnd.yollama.image.json" {
 			blobName := strings.Replace(layer.Digest, ":", "-", 1)
 			blobPath := filepath.Join(defaultBlobDir(), blobName)
 
@@ -1104,7 +1104,7 @@ func CreateSafetensorsModel(modelName, modelDir, quantize string, createLayer La
 						"quant_type": "nvfp4",
 						"group_size": "16",
 					}),
-					"application/vnd.ollama.image.tensor",
+					"application/vnd.yollama.image.tensor",
 					groupName,
 				)
 				if err != nil {
@@ -1147,7 +1147,7 @@ func CreateSafetensorsModel(modelName, modelDir, quantize string, createLayer La
 			return fmt.Errorf("failed to open %s: %w", cfgPath, err)
 		}
 
-		layer, err := createLayer(f, "application/vnd.ollama.image.json", cfgPath)
+		layer, err := createLayer(f, "application/vnd.yollama.image.json", cfgPath)
 		f.Close()
 		if err != nil {
 			return fmt.Errorf("failed to create layer for %s: %w", cfgPath, err)
@@ -1294,7 +1294,7 @@ func CreateDraftSafetensorsLayers(modelDir, tensorPrefix, configPrefix, draftQua
 		if err != nil {
 			return nil, fmt.Errorf("failed to open draft %s: %w", cfgPath, err)
 		}
-		layer, err := createLayer(f, "application/vnd.ollama.image.json", path.Join(configPrefix, cfgPath))
+		layer, err := createLayer(f, "application/vnd.yollama.image.json", path.Join(configPrefix, cfgPath))
 		f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create draft config layer for %s: %w", cfgPath, err)
@@ -1413,7 +1413,7 @@ func createPrequantizedLayer(
 
 	layer, err := createLayer(
 		safetensors.BuildPackedSafetensorsReaderWithMetadata(tensors, metadata),
-		"application/vnd.ollama.image.tensor",
+		"application/vnd.yollama.image.tensor",
 		tensorName,
 	)
 	if err != nil {
@@ -1502,7 +1502,7 @@ func createModelOptFP4Layer(
 
 	layer, err := createLayer(
 		safetensors.BuildPackedSafetensorsReaderWithMetadata(tensors, md),
-		"application/vnd.ollama.image.tensor",
+		"application/vnd.yollama.image.tensor",
 		tensorName,
 	)
 	if err != nil {
@@ -1573,7 +1573,7 @@ func createPackedNVFP4Layer(
 
 	layer, err := createLayer(
 		safetensors.BuildPackedSafetensorsReaderWithMetadata(tensors, md),
-		"application/vnd.ollama.image.tensor",
+		"application/vnd.yollama.image.tensor",
 		weightName,
 	)
 	if err != nil {
@@ -1610,7 +1610,7 @@ func createPackedNVFP4ExpertGroupLayer(groupName string, tensors []*safetensors.
 	}
 	layer, err := createLayer(
 		safetensors.BuildPackedSafetensorsReaderWithMetadata(packed, metadata),
-		"application/vnd.ollama.image.tensor",
+		"application/vnd.yollama.image.tensor",
 		groupName,
 	)
 	if err != nil {
@@ -1695,7 +1695,7 @@ func stackPackedNVFP4ExpertGroup(groupName string, tensors []*safetensors.Tensor
 			stackedShape = append(stackedShape, baseShape...)
 		}
 
-		f, err := os.CreateTemp("", "ollama-packed-nvfp4-*.bin")
+		f, err := os.CreateTemp("", "yollama-packed-nvfp4-*.bin")
 		if err != nil {
 			cleanup()
 			return nil, nil, false, fmt.Errorf("create temp tensor for %s: %w", stackedName, err)

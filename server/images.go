@@ -135,7 +135,7 @@ func (m *Model) ggufCapabilities(capabilities []model.Capability) ([]model.Capab
 	defer f.Close()
 
 	modelArch := f.KeyValue("general.architecture").String()
-	if !usesOllamaRenderedChat(m) {
+	if !usesYollamaRenderedChat(m) {
 		capabilities = chatTemplateCapabilities(capabilities, f.KeyValue("tokenizer.chat_template").String())
 	}
 	if f.KeyValue("pooling_type").Valid() {
@@ -508,7 +508,7 @@ func GetModel(name string) (*Model, error) {
 		}
 
 		switch layer.MediaType {
-		case "application/vnd.ollama.image.model":
+		case "application/vnd.yollama.image.model":
 			m.ModelPath = filename
 			m.ParentModel = layer.From
 			if m.isGGUF() {
@@ -524,16 +524,16 @@ func GetModel(name string) (*Model, error) {
 			}
 		case manifest.MediaTypeImageDraft:
 			m.DraftPath = filename
-		case "application/vnd.ollama.image.embed":
+		case "application/vnd.yollama.image.embed":
 			// Deprecated in versions  > 0.1.2
 			// TODO: remove this warning in a future version
 			slog.Info("WARNING: model contains embeddings, but embeddings in modelfiles have been deprecated and will be ignored.")
-		case "application/vnd.ollama.image.adapter":
+		case "application/vnd.yollama.image.adapter":
 			m.AdapterPaths = append(m.AdapterPaths, filename)
-		case "application/vnd.ollama.image.projector":
+		case "application/vnd.yollama.image.projector":
 			m.ProjectorPaths = append(m.ProjectorPaths, filename)
-		case "application/vnd.ollama.image.prompt",
-			"application/vnd.ollama.image.template":
+		case "application/vnd.yollama.image.prompt",
+			"application/vnd.yollama.image.template":
 			m.HasGoTemplate = true
 			bts, err := os.ReadFile(filename)
 			if err != nil {
@@ -544,14 +544,14 @@ func GetModel(name string) (*Model, error) {
 			if err != nil {
 				return nil, err
 			}
-		case "application/vnd.ollama.image.system":
+		case "application/vnd.yollama.image.system":
 			bts, err := os.ReadFile(filename)
 			if err != nil {
 				return nil, err
 			}
 
 			m.System = string(bts)
-		case "application/vnd.ollama.image.params":
+		case "application/vnd.yollama.image.params":
 			params, err := os.Open(filename)
 			if err != nil {
 				return nil, err
@@ -562,7 +562,7 @@ func GetModel(name string) (*Model, error) {
 			if err = json.NewDecoder(params).Decode(&m.Options); err != nil {
 				return nil, err
 			}
-		case "application/vnd.ollama.image.messages":
+		case "application/vnd.yollama.image.messages":
 			msgs, err := os.Open(filename)
 			if err != nil {
 				return nil, err
@@ -572,7 +572,7 @@ func GetModel(name string) (*Model, error) {
 			if err = json.NewDecoder(msgs).Decode(&m.Messages); err != nil {
 				return nil, err
 			}
-		case "application/vnd.ollama.image.license":
+		case "application/vnd.yollama.image.license":
 			bts, err := os.ReadFile(filename)
 			if err != nil {
 				return nil, err
@@ -583,13 +583,13 @@ func GetModel(name string) (*Model, error) {
 
 	ggufCaps := chatTemplateCapabilities(nil, ggufChatTemplate)
 	goCaps := goTemplateCapabilities(m.Template)
-	if !goTemplateEnvSet() && m.HasGoTemplate && ggufChatTemplate != "" && m.Config.Renderer == "" && m.Config.Parser == "" && !shouldUseHarmony(m) && hasMoreCapabilities(ggufCaps, goCaps) {
+	if !goTemplateEnvSet() && m.HasGoTemplate && ggufChatTemplate != "" && m.Config.Renderer == "" && m.Config.Parser == "" && hasMoreCapabilities(ggufCaps, goCaps) {
 		m.PreferChatTemplate = true
 		slog.Debug("using GGUF chat_template because it has stronger capabilities than Go TEMPLATE", "model", m.Name, "chat_template_capabilities", ggufCaps, "go_template_capabilities", goCaps)
 	}
 
-	if m.ModelPath != "" && m.isGGUF() && !modelHasPooling && !m.HasChatTemplate && (!m.HasGoTemplate || !envconfig.GoTemplate(true)) && m.Config.Renderer == "" && m.Config.Parser == "" && !shouldUseHarmony(m) {
-		slog.Warn("model is missing tokenizer.chat_template and Go TEMPLATE support is unavailable; chat responses may be poorly formatted", "model", m.Name, "env", "OLLAMA_GO_TEMPLATE=1")
+	if m.ModelPath != "" && m.isGGUF() && !modelHasPooling && !m.HasChatTemplate && (!m.HasGoTemplate || !envconfig.GoTemplate(true)) && m.Config.Renderer == "" && m.Config.Parser == "" {
+		slog.Warn("model is missing tokenizer.chat_template and Go TEMPLATE support is unavailable; chat responses may be poorly formatted", "model", m.Name, "env", "YOLLAMA_GO_TEMPLATE=1")
 	}
 
 	return m, nil
@@ -1042,7 +1042,7 @@ func makeRequest(ctx context.Context, method string, requestURL *url.URL, header
 		}
 	}
 
-	req.Header.Set("User-Agent", fmt.Sprintf("ollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
+	req.Header.Set("User-Agent", fmt.Sprintf("yollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
 
 	if s := req.Header.Get("Content-Length"); s != "" {
 		contentLength, err := strconv.ParseInt(s, 10, 64)

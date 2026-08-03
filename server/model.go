@@ -61,9 +61,9 @@ func parseFromModel(ctx context.Context, name model.Name, fn func(api.ProgressRe
 		layer.Name = srcLayer.Name
 
 		switch layer.MediaType {
-		case "application/vnd.ollama.image.model",
-			"application/vnd.ollama.image.projector",
-			"application/vnd.ollama.image.adapter",
+		case "application/vnd.yollama.image.model",
+			"application/vnd.yollama.image.projector",
+			"application/vnd.yollama.image.adapter",
 			manifest.MediaTypeImageDraft:
 			blobpath, err := manifest.BlobsPath(layer.Digest)
 			if err != nil {
@@ -96,7 +96,7 @@ func detectChatTemplate(layers []*layerGGML) ([]*layerGGML, error) {
 			if t, err := template.Named(s); err != nil {
 				slog.Debug("template detection", "error", err, "template", s)
 			} else {
-				layer, err := manifest.NewLayer(t.Reader(), "application/vnd.ollama.image.template")
+				layer, err := manifest.NewLayer(t.Reader(), "application/vnd.yollama.image.template")
 				if err != nil {
 					return nil, err
 				}
@@ -110,7 +110,7 @@ func detectChatTemplate(layers []*layerGGML) ([]*layerGGML, error) {
 						return nil, err
 					}
 
-					layer, err := manifest.NewLayer(&b, "application/vnd.ollama.image.params")
+					layer, err := manifest.NewLayer(&b, "application/vnd.yollama.image.params")
 					if err != nil {
 						return nil, err
 					}

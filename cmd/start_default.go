@@ -10,5 +10,5 @@ import (
 )
 
 func startApp(ctx context.Context, client *api.Client) error {
-	return errors.New("could not connect to xllama server, run 'xllama serve' to start it")
+	return errors.New("could not connect to yollama server, run 'yollama serve' to start it")
 }

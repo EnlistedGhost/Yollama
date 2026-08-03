@@ -353,7 +353,7 @@ func (db *DownEncoderBlock2D) Forward(x *mlx.Array) *mlx.Array {
 	return x
 }
 
-// Load loads the Flux2 VAE from ollama blob storage.
+// Load loads the Flux2 VAE from yollama blob storage.
 func (m *AutoencoderKLFlux2) Load(modelManifest *manifest.ModelManifest) error {
 	fmt.Print("  Loading VAE... ")
 

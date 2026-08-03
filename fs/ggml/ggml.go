@@ -275,7 +275,7 @@ func (kv KV) Value(key string) any {
 	return kv[key]
 }
 
-func (kv KV) OllamaEngineRequired() bool {
+func (kv KV) YollamaEngineRequired() bool {
 	return slices.Contains([]string{
 		"bert",
 		"deepseek2",
@@ -750,8 +750,8 @@ func (f GGML) GraphSize(context, batch uint64, numParallel int, kvCacheType stri
 			partialOffload *= 4
 		}
 
-		// Gemma2 also has sliding window attention but we only have an optimized implementation in the Ollama
-		// engine. Gemma3 always uses the Ollama engine.
+		// Gemma2 also has sliding window attention but we only have an optimized implementation in the Yollama
+		// engine. Gemma3 always uses the Yollama engine.
 		if f.KV().Architecture() == "gemma3" {
 			const gemma3GlobalCacheCount = 6
 			slidingWindow := (uint64(numParallel) * uint64(f.KV().Uint("attention.sliding_window"))) + batch

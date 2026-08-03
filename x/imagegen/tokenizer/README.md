@@ -1,6 +1,6 @@
 # Tokenizer
 
-Tokenizer for LLM inference supporting BPE, SentencePiece, and WordPiece algorithms. The goal of this package is to see if a pure Go tokenizer can be fast and correct. It primarily supports the `imagegen` models however it (or parts of it) could be considered to replace Ollama's tokenizer in the `model` package.
+Tokenizer for LLM inference supporting BPE, SentencePiece, and WordPiece algorithms. The goal of this package is to see if a pure Go tokenizer can be fast and correct. It primarily supports the `imagegen` models however it (or parts of it) could be considered to replace Yollama's tokenizer in the `model` package.
 
 ## Features
 
@@ -50,7 +50,7 @@ Comparison with other implementations (10 MB input):
 |----------------|--------------|-------|
 | Engine (this) | ~10 MB/s | stdlib RE2, parallel >4KB |
 | tiktoken (Rust) | ~17 MB/s | Highly optimized regex |
-| Ollama (Go) | ~2-3 MB/s | regexp2 backtracking |
+| Yollama (Go) | ~2-3 MB/s | regexp2 backtracking |
 
 ## Performance Opportunities
 

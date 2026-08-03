@@ -80,7 +80,7 @@ func buildModelInfo(config modelConfig, totalTensorBytes, tensorCount int64) map
 	// Determine architecture
 	arch := config.ModelType
 	if arch == "" && len(config.Architectures) > 0 {
-		// Convert HuggingFace architecture name to Ollama format
+		// Convert HuggingFace architecture name to Yollama format
 		// e.g., "Gemma3ForCausalLM" -> "gemma3"
 		hfArch := config.Architectures[0]
 		arch = strings.ToLower(hfArch)

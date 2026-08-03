@@ -63,7 +63,7 @@ const (
 	TensorTypeQ6_K
 	TensorTypeQ8_K
 
-	// unexported // unquantizable by ollama
+	// unexported // unquantizable by yollama
 	tensorTypeIQ2_XXS
 	tensorTypeIQ2_XS
 	tensorTypeIQ3_XXS
@@ -79,7 +79,7 @@ const (
 	TensorTypeI64
 	TensorTypeF64
 
-	// unexported // unquantizable by ollama
+	// unexported // unquantizable by yollama
 	tensorTypeIQ1_M
 
 	TensorTypeBF16
@@ -89,7 +89,7 @@ const (
 	tensorTypeQ4_0_4_8
 	tensorTypeQ4_0_8_8
 
-	// unexported // unquantizable by ollama
+	// unexported // unquantizable by yollama
 	tensorTypeTQ1_0
 	tensorTypeTQ2_0
 

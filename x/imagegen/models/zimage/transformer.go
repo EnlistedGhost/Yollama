@@ -397,7 +397,7 @@ type Transformer struct {
 	*TransformerConfig
 }
 
-// Load loads the Z-Image transformer from ollama blob storage.
+// Load loads the Z-Image transformer from yollama blob storage.
 func (m *Transformer) Load(modelManifest *manifest.ModelManifest) error {
 	fmt.Print("  Loading transformer... ")
 

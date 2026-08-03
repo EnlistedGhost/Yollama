@@ -640,7 +640,7 @@ type VAEDecoder struct {
 	Tiling *vae.TilingConfig
 }
 
-// Load loads the VAE decoder from ollama blob storage.
+// Load loads the VAE decoder from yollama blob storage.
 func (m *VAEDecoder) Load(modelManifest *manifest.ModelManifest) error {
 	// Load config from blob
 	var cfg VAEConfig

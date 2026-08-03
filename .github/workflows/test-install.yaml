@@ -17,6 +17,6 @@ jobs:
       - name: Run install script
         run: sh ./scripts/install.sh
         env:
-          OLLAMA_NO_START: 1 # do not start app
-      - name: Verify ollama is available
-        run: ollama --version
+          YOLLAMA_NO_START: 1 # do not start app
+      - name: Verify yollama is available
+        run: yollama --version

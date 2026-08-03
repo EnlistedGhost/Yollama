@@ -1,6 +1,6 @@
 #pragma once
 
-// Ollama-format GGUF compatibility shim.
+// Yollama-format GGUF compatibility shim.
 //
 // Existing published GGUFs can differ from what llama.cpp expects in a
 // handful of per-architecture details: arch names, KV keys, tensor names, or
@@ -17,7 +17,7 @@
 //        translate_clip_metadata()   — rewrite KVs + tensor names for clip
 //        maybe_load_tensor()         — override file read (e.g. F16->F32)
 //
-// Detection is per-arch; for any non-Ollama file every entry point is a
+// Detection is per-arch; for any non-Yollama file every entry point is a
 // no-op. Per-arch logic lives in anonymous-namespace handle_<arch>()
 // functions in the .cpp; adding a new arch is a new handler plus one
 // dispatch line in each translate_* entry point.
@@ -32,7 +32,7 @@ struct ggml_context;
 struct ggml_tensor;
 struct llama_model_loader;
 
-namespace llama_ollama_compat {
+namespace llama_yollama_compat {
 
 // Called from llama_model_loader's constructor, right after the arch is read.
 // `fname` is the model file path, captured here so later load-time hooks
@@ -79,4 +79,4 @@ bool maybe_load_text_tensor(const llama_model_loader * ml,
                             ggml_tensor * cur,
                             size_t file_offset);
 
-} // namespace llama_ollama_compat
+} // namespace llama_yollama_compat

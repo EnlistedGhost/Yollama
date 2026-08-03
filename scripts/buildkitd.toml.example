@@ -1,4 +1,4 @@
-# Suggested BuildKit GC config for Ollama local development.
+# Suggested BuildKit GC config for Yollama local development.
 
 [worker.oci]
   gc = true

@@ -31,7 +31,7 @@ import (
 //     - enable_thinking=true:  outputs <think> to start reasoning
 //     - enable_thinking=false: outputs </think> to skip reasoning
 //
-// OLLAMA DEFAULTS:
+// YOLLAMA DEFAULTS:
 //   - Thinking is ENABLED by default (thinkValue=nil or true outputs <think>)
 //   - Thinking is PRESERVED by default (reasoning content from previous turns is always
 //     included in <think>...</think> blocks, equivalent to clear_thinking=false)

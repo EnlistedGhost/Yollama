@@ -389,7 +389,7 @@ type Flux2Transformer2DModel struct {
 	*TransformerConfig
 }
 
-// Load loads the Flux2 transformer from ollama blob storage.
+// Load loads the Flux2 transformer from yollama blob storage.
 func (m *Flux2Transformer2DModel) Load(modelManifest *manifest.ModelManifest) error {
 	fmt.Print("  Loading transformer... ")
 

@@ -1,7 +1,7 @@
-// Package imagegen provides experimental image generation capabilities for Ollama.
+// Package imagegen provides experimental image generation capabilities for Yollama.
 //
 // This package is in x/ because the tensor model storage format is under development.
-// The goal is to integrate these capabilities into the main Ollama packages once
+// The goal is to integrate these capabilities into the main Yollama packages once
 // the format is stable.
 //
 // TODO (jmorganca): Integrate into main packages when stable:
@@ -51,7 +51,7 @@ func ResolveModelName(modelName string) string {
 }
 
 // DetectModelType reads model_index.json and returns the model type.
-// Checks both "architecture" (Ollama format) and "_class_name" (diffusers format).
+// Checks both "architecture" (Yollama format) and "_class_name" (diffusers format).
 // Returns empty string if detection fails.
 func DetectModelType(modelName string) string {
 	modelManifest, err := manifest.LoadManifest(modelName)
@@ -72,7 +72,7 @@ func DetectModelType(modelName string) string {
 		return ""
 	}
 
-	// Prefer architecture (Ollama format), fall back to _class_name (diffusers)
+	// Prefer architecture (Yollama format), fall back to _class_name (diffusers)
 	if index.Architecture != "" {
 		return index.Architecture
 	}

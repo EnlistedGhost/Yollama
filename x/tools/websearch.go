@@ -19,14 +19,14 @@ import (
 )
 
 const (
-	webSearchAPI     = "https://ollama.com/api/web_search"
+	webSearchAPI     = "http://127.0.0.1:5005/api/web_search"
 	webSearchTimeout = 15 * time.Second
 )
 
 // ErrWebSearchAuthRequired is returned when web search requires authentication
 var ErrWebSearchAuthRequired = errors.New("web search requires authentication")
 
-// WebSearchTool implements web search using Ollama's hosted API.
+// WebSearchTool implements web search using Yollama's hosted API.
 type WebSearchTool struct{}
 
 // Name returns the tool name.
@@ -76,7 +76,7 @@ type webSearchResult struct {
 }
 
 // Execute performs the web search.
-// Uses Ollama key signing for authentication - this makes requests via ollama.com API.
+// Uses Yollama key signing for authentication - this makes requests via yollama.com API.
 func (w *WebSearchTool) Execute(args map[string]any) (string, error) {
 	if internalcloud.Disabled() {
 		return "", errors.New(internalcloud.DisabledError("web search is unavailable"))
@@ -108,8 +108,8 @@ func (w *WebSearchTool) Execute(args map[string]any) (string, error) {
 	q.Add("ts", strconv.FormatInt(time.Now().Unix(), 10))
 	searchURL.RawQuery = q.Encode()
 
-	// Sign the request using Ollama key (~/.ollama/id_ed25519)
-	// This authenticates with ollama.com using the local signing key
+	// Sign the request using Yollama key (~/.yollama/id_ed25519)
+	// This authenticates with yollama.com using the local signing key
 	ctx := context.Background()
 	data := fmt.Appendf(nil, "%s,%s", http.MethodPost, searchURL.RequestURI())
 	signature, err := auth.Sign(ctx, data)

@@ -1,5 +1,5 @@
 // Package config provides integration configuration for external coding tools
-// (Claude Code, Codex, Droid, OpenCode) to use Ollama models.
+// (Claude Code, Codex, Droid, OpenCode) to use Yollama models.
 package config
 
 import (
@@ -33,7 +33,7 @@ func configPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".ollama", "config.json"), nil
+	return filepath.Join(home, ".yollama", "config.json"), nil
 }
 
 func legacyConfigPath() (string, error) {
@@ -41,10 +41,10 @@ func legacyConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".ollama", "config", "config.json"), nil
+	return filepath.Join(home, ".yollama", "config", "config.json"), nil
 }
 
-// migrateConfig moves the config from the legacy path to ~/.ollama/config.json
+// migrateConfig moves the config from the legacy path to ~/.yollama/config.json
 func migrateConfig() (bool, error) {
 	oldPath, err := legacyConfigPath()
 	if err != nil {
@@ -157,7 +157,7 @@ func SaveIntegration(appName string, models []string) error {
 	return save(cfg)
 }
 
-// MarkIntegrationOnboarded marks an integration as onboarded in Ollama's config.
+// MarkIntegrationOnboarded marks an integration as onboarded in Yollama's config.
 func MarkIntegrationOnboarded(appName string) error {
 	cfg, err := load()
 	if err != nil {

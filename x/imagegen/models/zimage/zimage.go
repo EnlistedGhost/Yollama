@@ -43,7 +43,7 @@ type Model struct {
 	qkvFused    bool // Track if QKV has been fused (do only once)
 }
 
-// Load loads the Z-Image model from ollama blob storage.
+// Load loads the Z-Image model from yollama blob storage.
 func (m *Model) Load(modelName string) error {
 	fmt.Printf("Loading Z-Image model from manifest: %s...\n", modelName)
 	start := time.Now()

@@ -14,5 +14,5 @@ test_data
 __debug_bin*
 llama/build
 llama/vendor
-/ollama
+/yollama
 integration/testdata/models/

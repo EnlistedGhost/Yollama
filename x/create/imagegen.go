@@ -142,7 +142,7 @@ func CreateImageGenModel(modelName, modelDir, quantize string, createLayer Layer
 
 		var r io.Reader
 
-		// For model_index.json, normalize to Ollama format and add metadata
+		// For model_index.json, normalize to Yollama format and add metadata
 		if cfgPath == "model_index.json" {
 			data, err := os.ReadFile(fullPath)
 			if err != nil {
@@ -185,7 +185,7 @@ func CreateImageGenModel(modelName, modelDir, quantize string, createLayer Layer
 			r = f
 		}
 
-		layer, err := createLayer(r, "application/vnd.ollama.image.json", cfgPath)
+		layer, err := createLayer(r, "application/vnd.yollama.image.json", cfgPath)
 		if err != nil {
 			return fmt.Errorf("failed to create layer for %s: %w", cfgPath, err)
 		}

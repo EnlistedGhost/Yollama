@@ -40,7 +40,7 @@ func GPUDevices(ctx context.Context, runners []ml.FilteredRunnerDiscovery) []ml.
 	if !bootstrapped {
 		msg = "GPU bootstrap discovery took"
 		libDirs = make(map[string]struct{})
-		files, err := filepath.Glob(filepath.Join(ml.LibOllamaPath, "*", "*ggml-*"))
+		files, err := filepath.Glob(filepath.Join(ml.LibYollamaPath, "*", "*ggml-*"))
 		if err != nil {
 			slog.Debug("unable to lookup runner library directories", "error", err)
 		}
@@ -89,14 +89,14 @@ func GPUDevices(ctx context.Context, runners []ml.FilteredRunnerDiscovery) []ml.
 				} else if jetpack != "" && filepath.Base(dir) != "cuda_"+jetpack {
 					continue
 				} else if jetpack == "" && strings.Contains(filepath.Base(dir), "cuda_jetpack") {
-					slog.Debug("jetpack not detected (set JETSON_JETPACK or OLLAMA_LLM_LIBRARY to override), skipping", "libDir", dir)
+					slog.Debug("jetpack not detected (set JETSON_JETPACK or YOLLAMA_LLM_LIBRARY to override), skipping", "libDir", dir)
 					continue
 				} else if !envconfig.EnableVulkan(true) && strings.Contains(filepath.Base(dir), "vulkan") {
 					continue
 				}
-				dirs = []string{ml.LibOllamaPath, dir}
+				dirs = []string{ml.LibYollamaPath, dir}
 			} else {
-				dirs = []string{ml.LibOllamaPath}
+				dirs = []string{ml.LibYollamaPath}
 			}
 
 			ctx1stPass, cancel := context.WithTimeout(ctx, bootstrapTimeout)
@@ -240,7 +240,7 @@ func GPUDevices(ctx context.Context, runners []ml.FilteredRunnerDiscovery) []ml.
 		libDirs = make(map[string]struct{})
 		for _, dev := range devices {
 			dir := dev.LibraryPath[len(dev.LibraryPath)-1]
-			if dir != ml.LibOllamaPath {
+			if dir != ml.LibYollamaPath {
 				libDirs[dir] = struct{}{}
 			}
 		}
@@ -331,7 +331,7 @@ func GPUDevices(ctx context.Context, runners []ml.FilteredRunnerDiscovery) []ml.
 			devFilter := ml.GetDevicesEnv(devices)
 
 			for dir := range libDirs {
-				updatedDevices := bootstrapDevicesWithMetalRetry(rctx, ctx, 3*time.Second, []string{ml.LibOllamaPath, dir}, devFilter)
+				updatedDevices := bootstrapDevicesWithMetalRetry(rctx, ctx, 3*time.Second, []string{ml.LibYollamaPath, dir}, devFilter)
 				for _, u := range updatedDevices {
 					for i := range devices {
 						if u.DeviceID == devices[i].DeviceID && u.PCIID == devices[i].PCIID {
@@ -459,7 +459,7 @@ func bootstrapDevicesWithMetalRetry(firstAttemptCtx, retryParentCtx context.Cont
 	runDiscovery := func(ctx context.Context, extraEnvs map[string]string) ([]ml.DeviceInfo, *llm.StatusWriter, error) {
 		start := time.Now()
 		defer func() {
-			slog.Debug("bootstrap discovery took", "duration", time.Since(start), "OLLAMA_LIBRARY_PATH", ollamaLibDirs, "extra_envs", extraEnvs)
+			slog.Debug("bootstrap discovery took", "duration", time.Since(start), "YOLLAMA_LIBRARY_PATH", ollamaLibDirs, "extra_envs", extraEnvs)
 		}()
 		return bootstrapDevicesWithStatusWatchdog(ctx, ollamaLibDirs, extraEnvs)
 	}
@@ -487,7 +487,7 @@ func bootstrapDevicesWithMetalRetry(firstAttemptCtx, retryParentCtx context.Cont
 		}
 	}
 
-	slog.Info("failure during llama-server GPU discovery", "OLLAMA_LIBRARY_PATH", ollamaLibDirs, "extra_envs", extraEnvs, "error", err, "detail", lastDiscoveryStatusError(status))
+	slog.Info("failure during llama-server GPU discovery", "YOLLAMA_LIBRARY_PATH", ollamaLibDirs, "extra_envs", extraEnvs, "error", err, "detail", lastDiscoveryStatusError(status))
 	return devices
 }
 
@@ -549,7 +549,7 @@ func runBootstrapDevicesWithStatusWatchdog(
 	case result := <-resultCh:
 		return result.devices, result.status, result.err
 	case <-ctx.Done():
-		slog.Warn("llama-server GPU discovery watchdog timed out", "OLLAMA_LIBRARY_PATH", ollamaLibDirs, "extra_envs", extraEnvs, "error", ctx.Err())
+		slog.Warn("llama-server GPU discovery watchdog timed out", "YOLLAMA_LIBRARY_PATH", ollamaLibDirs, "extra_envs", extraEnvs, "error", ctx.Err())
 		return nil, nil, ctx.Err()
 	}
 }
@@ -703,7 +703,7 @@ func detectIncompatibleLibraries() {
 	if err != nil || basePath == "" {
 		return
 	}
-	if !strings.HasPrefix(basePath, ml.LibOllamaPath) {
+	if !strings.HasPrefix(basePath, ml.LibYollamaPath) {
 		slog.Warn("potentially incompatible library detected in PATH", "location", basePath)
 	}
 }

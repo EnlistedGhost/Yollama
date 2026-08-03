@@ -1,4 +1,4 @@
-// Package manifest provides documentation for the Ollama manifest format.
+// Package manifest provides documentation for the Yollama manifest format.
 // This package contains no code.
 //
 // # Manifests
@@ -23,7 +23,7 @@
 //
 // The configuration of a model is represented as a layer with the media type:
 //
-//	application/vnd.ollama.image.config; type=<type>
+//	application/vnd.yollama.image.config; type=<type>
 //
 // The "type" parameter in the media type specifies the format of the
 // configuration (e.g., "safetensor" or "gguf").
@@ -34,7 +34,7 @@
 //
 // The model template is a layer with the media type:
 //
-//	application/vnd.ollama.image.template; [name=<name>]
+//	application/vnd.yollama.image.template; [name=<name>]
 //
 // The "name" parameter in the media type specifies the name of the template as
 // for lookup at runtime. The name is optional and may be omitted. If omitted,
@@ -44,7 +44,7 @@
 //
 // The tensors of a model are represented as layers with the media type:
 //
-//	application/vnd.ollama.image.tensor; name=<name>; dtype=<dtype>; shape=<shape>
+//	application/vnd.yollama.image.tensor; name=<name>; dtype=<dtype>; shape=<shape>
 //
 // The "name" parameter in the media type specifies the name of the tensor as
 // defined in the model's configuration and are bound only by the rules for
@@ -63,17 +63,17 @@
 //
 // The tokenization of a model is represented as a layer with the media type:
 //
-//	application/vnd.ollama.image.tokenizer
+//	application/vnd.yollama.image.tokenizer
 //
 // The configuration of the tokenizer is represented as a layer with the media type:
 //
-//	application/vnd.ollama.image.tokenizer.config
+//	application/vnd.yollama.image.tokenizer.config
 //
 // # Miscellaneous Layers
 //
 // These extra layer mime types are reserved:
 //
-//	application/vnd.ollama.image.license
+//	application/vnd.yollama.image.license
 //
 // This layer contains one of the many licenses for the model in plain text.
 //
@@ -85,32 +85,32 @@
 //	{
 //	  "layers": [{
 //	      "digest": "sha256:a...",
-//	      "mediaType": "application/vnd.ollama.image.config; type=safetensors",
+//	      "mediaType": "application/vnd.yollama.image.config; type=safetensors",
 //	      "size": 1234
 //	    },{
 //	      "digest": "sha256:b...",
-//	      "mediaType": "application/vnd.ollama.image.template",
+//	      "mediaType": "application/vnd.yollama.image.template",
 //	      "size": 5678
 //	    },{
 //	      "digest": "sha256:c...",
-//	      "mediaType": "application/vnd.ollama.image.tensor; name=input; dtype=F32; shape=1,2,3",
+//	      "mediaType": "application/vnd.yollama.image.tensor; name=input; dtype=F32; shape=1,2,3",
 //	      "size": 9012
 //	    },{
 //	      "digest": "sha256:d...",
-//	      "mediaType": "application/vnd.ollama.image.tensor; name=output; dtype=I32; shape=4,5,6",
+//	      "mediaType": "application/vnd.yollama.image.tensor; name=output; dtype=I32; shape=4,5,6",
 //	      "size": 3456
 //	  }]
 //	}
 //
 // # Legacy Media Types
 //
-// The appliaction/vnd.ollama.image.model media type is deprecated, but will
+// The appliaction/vnd.yollama.image.model media type is deprecated, but will
 // remain supported for backwards compatibility, for some undefined amount of
 // time. New models should use the media types defined above.
 //
 // # Reserved media types
 //
-// The media type prefix "application/vnd.ollama.image." is reserved for
-// defining new media types for layers known to Ollama. Currently, all other
-// prefixes are ignored by official Ollama registry clients.
+// The media type prefix "application/vnd.yollama.image." is reserved for
+// defining new media types for layers known to Yollama. Currently, all other
+// prefixes are ignored by official Yollama registry clients.
 package manifest

@@ -178,7 +178,7 @@ type TextEncoder struct {
 	*Config
 }
 
-// Load loads the Qwen3 text encoder from ollama blob storage.
+// Load loads the Qwen3 text encoder from yollama blob storage.
 func (m *TextEncoder) Load(modelManifest *manifest.ModelManifest, configPath string) error {
 	fmt.Print("  Loading text encoder... ")
 

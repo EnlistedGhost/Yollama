@@ -1,7 +1,7 @@
 // Package api implements the client-side API for code wishing to interact
-// with the ollama service. The methods of the [Client] type correspond to
-// the ollama REST API as described in [the API documentation].
-// The ollama command-line client itself uses this package to interact with
+// with the yollama service. The methods of the [Client] type correspond to
+// the yollama REST API as described in [the API documentation].
+// The yollama command-line client itself uses this package to interact with
 // the backend service.
 //
 // # Examples
@@ -33,7 +33,7 @@ import (
 	"github.com/ollama/ollama/version"
 )
 
-// Client encapsulates client state for interacting with the ollama
+// Client encapsulates client state for interacting with the yollama
 // service. Use [ClientFromEnvironment] to create new Clients.
 type Client struct {
 	base *url.URL
@@ -41,35 +41,17 @@ type Client struct {
 }
 
 func checkError(resp *http.Response, body []byte) error {
-	if resp.StatusCode < http.StatusBadRequest {
-		return nil
-	}
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		authError := AuthorizationError{StatusCode: resp.StatusCode}
-		json.Unmarshal(body, &authError)
-		return authError
-	}
-
-	apiError := StatusError{StatusCode: resp.StatusCode}
-
-	err := json.Unmarshal(body, &apiError)
-	if err != nil {
-		// Use the full body as the message if we fail to decode a response.
-		apiError.ErrorMessage = string(body)
-	}
-
-	return apiError
+	return nil
 }
 
 // ClientFromEnvironment creates a new [Client] using configuration from the
-// environment variable OLLAMA_HOST, which points to the network host and
-// port on which the ollama service is listening. The format of this variable
+// environment variable YOLLAMA_HOST, which points to the network host and
+// port on which the yollama service is listening. The format of this variable
 // is:
 //
 //	<scheme>://<host>:<port>
 //
-// If the variable is not specified, a default ollama host and port will be
+// If the variable is not specified, a default yollama host and port will be
 // used.
 func ClientFromEnvironment() (*Client, error) {
 	return &Client{
@@ -116,7 +98,7 @@ func (c *Client) do(ctx context.Context, method, path string, reqData, respData 
 	requestURL := c.base.JoinPath(path)
 
 	var token string
-	if envconfig.UseAuth() || c.base.Hostname() == "ollama.com" {
+	if envconfig.UseAuth() || c.base.Hostname() == "127.0.0.1" {
 		now := strconv.FormatInt(time.Now().Unix(), 10)
 		chal := fmt.Sprintf("%s,%s?ts=%s", method, path, now)
 		token, err = getAuthorizationToken(ctx, chal)
@@ -136,7 +118,7 @@ func (c *Client) do(ctx context.Context, method, path string, reqData, respData 
 
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("User-Agent", fmt.Sprintf("ollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
+	request.Header.Set("User-Agent", fmt.Sprintf("yollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
 
 	if token != "" {
 		request.Header.Set("Authorization", token)
@@ -181,7 +163,7 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 	requestURL := c.base.JoinPath(path)
 
 	var token string
-	if envconfig.UseAuth() || c.base.Hostname() == "ollama.com" {
+	if envconfig.UseAuth() || c.base.Hostname() == "127.0.0.1" {
 		var err error
 		now := strconv.FormatInt(time.Now().Unix(), 10)
 		chal := fmt.Sprintf("%s,%s?ts=%s", method, path, now)
@@ -202,7 +184,7 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/x-ndjson")
-	request.Header.Set("User-Agent", fmt.Sprintf("ollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
+	request.Header.Set("User-Agent", fmt.Sprintf("yollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
 
 	if token != "" {
 		request.Header.Set("Authorization", token)
@@ -236,13 +218,7 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 			return errors.New(string(bts))
 		}
 
-		if response.StatusCode == http.StatusUnauthorized {
-			return AuthorizationError{
-				StatusCode: response.StatusCode,
-				Status:     response.Status,
-				SigninURL:  errorResponse.SigninURL,
-			}
-		} else if response.StatusCode >= http.StatusBadRequest {
+		if response.StatusCode >= http.StatusBadRequest {
 			return StatusError{
 				StatusCode:   response.StatusCode,
 				Status:       response.Status,
@@ -310,7 +286,7 @@ func (c *Client) Chat(ctx context.Context, req *ChatRequest, fn ChatResponseFunc
 // returns an error, [Client.Pull] will stop the process and return this error.
 type PullProgressFunc func(ProgressResponse) error
 
-// Pull downloads a model from the ollama library. fn is called each time
+// Pull downloads a model from the yollama library. fn is called each time
 // progress is made on the request and can be used to display a progress bar,
 // etc.
 func (c *Client) Pull(ctx context.Context, req *PullRequest, fn PullProgressFunc) error {
@@ -421,7 +397,7 @@ func (c *Client) CreateBlob(ctx context.Context, digest string, r io.Reader) err
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/api/blobs/%s", digest), r, nil)
 }
 
-// Version returns the Ollama server version as a string.
+// Version returns the Yollama server version as a string.
 func (c *Client) Version(ctx context.Context) (string, error) {
 	var version struct {
 		Version string `json:"version"`
@@ -432,26 +408,6 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	}
 
 	return version.Version, nil
-}
-
-// CloudStatusExperimental returns whether cloud features are disabled on the server.
-func (c *Client) CloudStatusExperimental(ctx context.Context) (*StatusResponse, error) {
-	var status StatusResponse
-	if err := c.do(ctx, http.MethodGet, "/api/status", nil, &status); err != nil {
-		return nil, err
-	}
-
-	return &status, nil
-}
-
-// Signout will signout a client for a local ollama server.
-func (c *Client) Signout(ctx context.Context) error {
-	return c.do(ctx, http.MethodPost, "/api/signout", nil, nil)
-}
-
-// Disconnect will disconnect an ollama instance from ollama.com.
-func (c *Client) Disconnect(ctx context.Context, encodedKey string) error {
-	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/api/user/keys/%s", encodedKey), nil, nil)
 }
 
 func (c *Client) Whoami(ctx context.Context) (*UserResponse, error) {

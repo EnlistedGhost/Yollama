@@ -40,7 +40,7 @@ func DefaultBlobDir() string {
 }
 
 // DefaultManifestDir returns the manifest storage directory.
-// Respects OLLAMA_MODELS.
+// Respects YOLLAMA_MODELS.
 
 func DefaultManifestDir() string {
 	return filepath.Join(envconfig.Models(), "manifests")
@@ -70,8 +70,8 @@ func LoadManifest(modelName string) (*ModelManifest, error) {
 // resolveManifestPath converts a model name to a manifest file path.
 func resolveManifestPath(modelName string) string {
 	// Parse model name into components
-	// Default: registry.ollama.ai/library/<name>/<tag>
-	host := "registry.ollama.ai"
+	// Default: registry.yollama.ai/library/<name>/<tag>
+	host := "registry.yollama.ai"
 	namespace := "library"
 	name := modelName
 	tag := "latest"
@@ -111,7 +111,7 @@ func (m *ModelManifest) BlobPath(digest string) string {
 func (m *ModelManifest) GetTensorLayers(component string) []ManifestLayer {
 	var layers []ManifestLayer
 	for _, layer := range m.Manifest.Layers {
-		if layer.MediaType != "application/vnd.ollama.image.tensor" {
+		if layer.MediaType != "application/vnd.yollama.image.tensor" {
 			continue
 		}
 		if component == "" || strings.HasPrefix(layer.Name, component+"/") {
@@ -124,7 +124,7 @@ func (m *ModelManifest) GetTensorLayers(component string) []ManifestLayer {
 // GetConfigLayer returns the config layer for a given path.
 func (m *ModelManifest) GetConfigLayer(configPath string) *ManifestLayer {
 	for _, layer := range m.Manifest.Layers {
-		if layer.MediaType == "application/vnd.ollama.image.json" && layer.Name == configPath {
+		if layer.MediaType == "application/vnd.yollama.image.json" && layer.Name == configPath {
 			return &layer
 		}
 	}
@@ -159,7 +159,7 @@ func (m *ModelManifest) OpenBlob(digest string) (io.ReadCloser, error) {
 // HasTensorLayers returns true if the manifest has any tensor layers.
 func (m *ModelManifest) HasTensorLayers() bool {
 	for _, layer := range m.Manifest.Layers {
-		if layer.MediaType == "application/vnd.ollama.image.tensor" {
+		if layer.MediaType == "application/vnd.yollama.image.tensor" {
 			return true
 		}
 	}
@@ -170,7 +170,7 @@ func (m *ModelManifest) HasTensorLayers() bool {
 func (m *ModelManifest) TotalTensorSize() int64 {
 	var total int64
 	for _, layer := range m.Manifest.Layers {
-		if layer.MediaType == "application/vnd.ollama.image.tensor" {
+		if layer.MediaType == "application/vnd.yollama.image.tensor" {
 			total += layer.Size
 		}
 	}
@@ -219,7 +219,7 @@ func GetModelInfo(modelName string) (*ModelInfo, error) {
 	if info.ParameterCount == 0 {
 		var totalSize int64
 		for _, layer := range manifest.Manifest.Layers {
-			if layer.MediaType == "application/vnd.ollama.image.tensor" {
+			if layer.MediaType == "application/vnd.yollama.image.tensor" {
 				totalSize += layer.Size
 			}
 		}
@@ -234,7 +234,7 @@ func GetModelInfo(modelName string) (*ModelInfo, error) {
 // to detect quantization type.
 func detectQuantizationFromBlobs(manifest *ModelManifest) string {
 	for _, layer := range manifest.Manifest.Layers {
-		if layer.MediaType != "application/vnd.ollama.image.tensor" {
+		if layer.MediaType != "application/vnd.yollama.image.tensor" {
 			continue
 		}
 		data, err := readBlobHeader(manifest.BlobPath(layer.Digest))

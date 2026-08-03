@@ -1,6 +1,6 @@
 // Package imagegen provides a unified MLX runner for both LLM and image generation models.
 //
-// This package handles safetensors models created with `ollama create --experimental`,
+// This package handles safetensors models created with `yollama create --experimental`,
 // supporting both text generation (LLM) and image generation (diffusion) models
 // through a single unified interface.
 package imagegen

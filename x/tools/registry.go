@@ -70,7 +70,7 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return tool, ok
 }
 
-// Tools returns all registered tools in Ollama API format, sorted by name.
+// Tools returns all registered tools in Yollama API format, sorted by name.
 func (r *Registry) Tools() api.Tools {
 	// Get sorted names for deterministic ordering
 	names := make([]string, 0, len(r.tools))
@@ -116,15 +116,15 @@ func (r *Registry) Count() int {
 
 // DefaultRegistry creates a registry with all built-in tools.
 // Tools can be disabled via environment variables:
-// - OLLAMA_AGENT_DISABLE_WEBSEARCH=1 disables web_search
-// - OLLAMA_AGENT_DISABLE_BASH=1 disables bash
+// - YOLLAMA_AGENT_DISABLE_WEBSEARCH=1 disables web_search
+// - YOLLAMA_AGENT_DISABLE_BASH=1 disables bash
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	// TODO(parthsareen): re-enable web search once it's ready for release
-	// if os.Getenv("OLLAMA_AGENT_DISABLE_WEBSEARCH") == "" {
+	// if os.Getenv("YOLLAMA_AGENT_DISABLE_WEBSEARCH") == "" {
 	// 	r.Register(&WebSearchTool{})
 	// }
-	if os.Getenv("OLLAMA_AGENT_DISABLE_BASH") == "" {
+	if os.Getenv("YOLLAMA_AGENT_DISABLE_BASH") == "" {
 		r.Register(&BashTool{})
 	}
 	return r

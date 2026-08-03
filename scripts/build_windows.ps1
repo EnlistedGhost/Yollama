@@ -222,7 +222,7 @@ function checkEnv {
     } else {
         $script:PKG_VERSION="0.0.0"
     }
-    Write-Output "Building Ollama $script:VERSION with package version $script:PKG_VERSION"
+    Write-Output "Building Yollama $script:VERSION with package version $script:PKG_VERSION"
 
     # Note: Windows Kits 10 signtool crashes with GCP's plugin
     if ($null -eq $env:SIGN_TOOL) {
@@ -231,14 +231,14 @@ function checkEnv {
         ${script:SignTool}=${env:SIGN_TOOL}
     }
     if ("${env:KEY_CONTAINER}") {
-        if (Test-Path "${script:SRC_DIR}\ollama_inc.crt") {
-            ${script:OLLAMA_CERT}=$(resolve-path "${script:SRC_DIR}\ollama_inc.crt")
+        if (Test-Path "${script:SRC_DIR}\yollama_inc.crt") {
+            ${script:YOLLAMA_CERT}=$(resolve-path "${script:SRC_DIR}\yollama_inc.crt")
             Write-host "Code signing enabled"
         } else {
-            Write-Output "WARNING: KEY_CONTAINER is set but ollama_inc.crt not found at ${script:SRC_DIR}\ollama_inc.crt - code signing disabled"
+            Write-Output "WARNING: KEY_CONTAINER is set but yollama_inc.crt not found at ${script:SRC_DIR}\yollama_inc.crt - code signing disabled"
         }
     } else {
-        Write-Output "Code signing disabled - please set KEY_CONTAINERS to sign and copy ollama_inc.crt to the top of the source tree"
+        Write-Output "Code signing disabled - please set KEY_CONTAINERS to sign and copy yollama_inc.crt to the top of the source tree"
     }
     if (!$env:CMAKE_GENERATOR) {
         $ninja = Get-Command -Name "ninja.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -252,8 +252,8 @@ function checkEnv {
         Write-Output "Using CMake generator: $env:CMAKE_GENERATOR"
     }
     ensureMsvcForNinja
-    if ($env:OLLAMA_BUILD_PARALLEL) {
-        $script:JOBS=[int]$env:OLLAMA_BUILD_PARALLEL
+    if ($env:YOLLAMA_BUILD_PARALLEL) {
+        $script:JOBS=[int]$env:YOLLAMA_BUILD_PARALLEL
     } else {
         # Use physical core count rather than logical processors (hyperthreads)
         # to avoid saturating the system during builds
@@ -268,7 +268,7 @@ function checkEnv {
             $script:JOBS = [Environment]::ProcessorCount
         }
     }
-    Write-Output "Build parallelism: $script:JOBS (set OLLAMA_BUILD_PARALLEL to override)"
+    Write-Output "Build parallelism: $script:JOBS (set YOLLAMA_BUILD_PARALLEL to override)"
 }
 
 
@@ -276,7 +276,7 @@ function cpu {
     mkdir -Force -path "${script:DIST_DIR}\" | Out-Null
     if ($script:ARCH -ne "arm64") {
         Remove-Item -ea 0 -recurse -force -path "${script:SRC_DIR}\dist\windows-${script:ARCH}"
-        New-Item "${script:SRC_DIR}\dist\windows-${script:ARCH}\lib\ollama\" -ItemType Directory -ea 0
+        New-Item "${script:SRC_DIR}\dist\windows-${script:ARCH}\lib\yollama\" -ItemType Directory -ea 0
 
         $oldCC = $env:CC
         $oldCXX = $env:CXX
@@ -347,9 +347,9 @@ function cpuArm64 {
     }
 
     $arm64DistDir = "${script:SRC_DIR}\dist\windows-arm64"
-    mkdir -Force -path "${arm64DistDir}\lib\ollama\" | Out-Null
-    Remove-Item -ea 0 -recurse -force -path "${arm64DistDir}\lib\ollama"
-    New-Item "${arm64DistDir}\lib\ollama\" -ItemType Directory -ea 0 | Out-Null
+    mkdir -Force -path "${arm64DistDir}\lib\yollama\" | Out-Null
+    Remove-Item -ea 0 -recurse -force -path "${arm64DistDir}\lib\yollama"
+    New-Item "${arm64DistDir}\lib\yollama\" -ItemType Directory -ea 0 | Out-Null
 
     # Cross-compile the Windows ARM64 CPU llama-server payload from an x64 host
     # with llvm-mingw. GPU backends are not built for Windows ARM64.
@@ -556,14 +556,14 @@ function mlxCuda13 {
             Write-Output "Building MLX CUDA v$cudaMajorVer backend libraries $cuda"
             $env:CUDAToolkit_ROOT=$cuda
             $cudaFlags = @()
-            if ($env:OLLAMA_CMAKE_CUDA_FLAGS) {
-                $cudaFlags += "-DCMAKE_CUDA_FLAGS=$env:OLLAMA_CMAKE_CUDA_FLAGS"
+            if ($env:YOLLAMA_CMAKE_CUDA_FLAGS) {
+                $cudaFlags += "-DCMAKE_CUDA_FLAGS=$env:YOLLAMA_CMAKE_CUDA_FLAGS"
             }
             $cudaToolsetArgs = cudaCMakeArgs $cuda
-            $configureArgs = @("-S", ".", "-B", "build\mlx_cuda_v$cudaMajorVer", "-DOLLAMA_MLX_BACKENDS=cuda_v$cudaMajorVer") + $cudaToolsetArgs + $cudaFlags + @("-DOLLAMA_PAYLOAD_INSTALL_PREFIX=$script:DIST_DIR", "--install-prefix", "$script:DIST_DIR")
+            $configureArgs = @("-S", ".", "-B", "build\mlx_cuda_v$cudaMajorVer", "-DYOLLAMA_MLX_BACKENDS=cuda_v$cudaMajorVer") + $cudaToolsetArgs + $cudaFlags + @("-DYOLLAMA_PAYLOAD_INSTALL_PREFIX=$script:DIST_DIR", "--install-prefix", "$script:DIST_DIR")
             & cmake @configureArgs
             if ($LASTEXITCODE -ne 0) { exit($LASTEXITCODE)}
-            $buildArgs = @("--build", "build\mlx_cuda_v$cudaMajorVer", "--target", "ollama-mlx-cuda_v$cudaMajorVer", "--config", "Release", "--parallel", "$script:JOBS")
+            $buildArgs = @("--build", "build\mlx_cuda_v$cudaMajorVer", "--target", "yollama-mlx-cuda_v$cudaMajorVer", "--config", "Release", "--parallel", "$script:JOBS")
             if ($env:CMAKE_GENERATOR -notlike "Ninja*") {
                 $buildArgs += @("--", "/nodeReuse:false")
             }
@@ -606,18 +606,18 @@ function withWindowsArm64GoEnv {
     }
 }
 
-function buildOllamaCLI {
+function buildYollamaCLI {
     param (
         [string]$distDir
     )
     mkdir -Force -path "${distDir}\" | Out-Null
-    & go build -trimpath -ldflags "-s -w -X=github.com/ollama/ollama/version.Version=$script:VERSION -X=github.com/ollama/ollama/server.mode=release" -o "${distDir}\ollama.exe" .
+    & go build -trimpath -ldflags "-s -w -X=github.com/ollama/ollama/version.Version=$script:VERSION -X=github.com/ollama/ollama/server.mode=release" -o "${distDir}\yollama.exe" .
     if ($LASTEXITCODE -ne 0) { exit($LASTEXITCODE)}
 }
 
-function ollama {
-    Write-Output "Building ollama CLI"
-    buildOllamaCLI $script:DIST_DIR
+function yollama {
+    Write-Output "Building yollama CLI"
+    buildYollamaCLI $script:DIST_DIR
 }
 
 function ollamaArm64 {
@@ -626,9 +626,9 @@ function ollamaArm64 {
         return
     }
 
-    Write-Output "Building ollama CLI for arm64"
+    Write-Output "Building yollama CLI for arm64"
     withWindowsArm64GoEnv {
-        buildOllamaCLI "${script:SRC_DIR}\dist\windows-arm64"
+        buildYollamaCLI "${script:SRC_DIR}\dist\windows-arm64"
     }
 }
 
@@ -637,7 +637,7 @@ function prepareApp {
         return
     }
 
-    Write-Output "Building Ollama App $script:VERSION with package version $script:PKG_VERSION"
+    Write-Output "Building Yollama App $script:VERSION with package version $script:PKG_VERSION"
 
     if (!(Get-Command npm -ErrorAction SilentlyContinue)) {
         Write-Output "npm is not installed. Please install Node.js and npm first:"
@@ -695,7 +695,7 @@ function buildApp {
     param (
         [string]$arch
     )
-	& go build -trimpath -ldflags "-s -w -H windowsgui -X=github.com/ollama/ollama/app/version.Version=$script:VERSION" -o .\dist\windows-ollama-app-${arch}.exe ./app/cmd/app/
+	& go build -trimpath -ldflags "-s -w -H windowsgui -X=github.com/ollama/ollama/app/version.Version=$script:VERSION" -o .\dist\windows-yollama-app-${arch}.exe ./app/cmd/app/
     if ($LASTEXITCODE -ne 0) { exit($LASTEXITCODE)}
 }
 
@@ -711,7 +711,7 @@ function appArm64 {
     }
 
     prepareApp
-    Write-Output "Building Ollama App for arm64"
+    Write-Output "Building Yollama App for arm64"
     withWindowsArm64GoEnv {
         buildApp "arm64"
     }
@@ -730,14 +730,14 @@ function sign {
     Copy-Item -Path "${script:SRC_DIR}\scripts\install.ps1" -Destination "${script:SRC_DIR}\dist\install.ps1" -ErrorAction Stop
 
     if ("${env:KEY_CONTAINER}") {
-        Write-Output "Signing Ollama executables, scripts and libraries"
-        & "${script:SignTool}" sign /v /fd sha256 /t http://timestamp.digicert.com /f "${script:OLLAMA_CERT}" `
+        Write-Output "Signing Yollama executables, scripts and libraries"
+        & "${script:SignTool}" sign /v /fd sha256 /t http://timestamp.digicert.com /f "${script:YOLLAMA_CERT}" `
             /csp "Google Cloud KMS Provider" /kc ${env:KEY_CONTAINER} `
             $(get-childitem -path "${script:SRC_DIR}\dist\windows-*" -r -include @('*.exe', '*.dll'))
         if ($LASTEXITCODE -ne 0) { exit($LASTEXITCODE)}
 
         Write-Output "Signing install.ps1"
-        & "${script:SignTool}" sign /v /fd sha256 /t http://timestamp.digicert.com /f "${script:OLLAMA_CERT}" `
+        & "${script:SignTool}" sign /v /fd sha256 /t http://timestamp.digicert.com /f "${script:YOLLAMA_CERT}" `
             /csp "Google Cloud KMS Provider" /kc ${env:KEY_CONTAINER} `
             "${script:SRC_DIR}\dist\install.ps1"
         if ($LASTEXITCODE -ne 0) { exit($LASTEXITCODE)}
@@ -751,13 +751,13 @@ function installer {
         Write-Output "ERROR: missing Inno Setup installation directory - install from https://jrsoftware.org/isdl.php"
         exit 1
     }
-    Write-Output "Building Ollama Installer"
+    Write-Output "Building Yollama Installer"
     cd "${script:SRC_DIR}\app"
     $env:PKG_VERSION=$script:PKG_VERSION
     if ("${env:KEY_CONTAINER}") {
-        & "${script:INNO_SETUP_DIR}\ISCC.exe" /DARCH=$script:TARGET_ARCH /SMySignTool="${script:SignTool} sign /fd sha256 /t http://timestamp.digicert.com /f ${script:OLLAMA_CERT} /csp `$qGoogle Cloud KMS Provider`$q /kc ${env:KEY_CONTAINER} `$f" .\ollama.iss
+        & "${script:INNO_SETUP_DIR}\ISCC.exe" /DARCH=$script:TARGET_ARCH /SMySignTool="${script:SignTool} sign /fd sha256 /t http://timestamp.digicert.com /f ${script:YOLLAMA_CERT} /csp `$qGoogle Cloud KMS Provider`$q /kc ${env:KEY_CONTAINER} `$f" .\yollama.iss
     } else {
-        & "${script:INNO_SETUP_DIR}\ISCC.exe" /DARCH=$script:TARGET_ARCH .\ollama.iss
+        & "${script:INNO_SETUP_DIR}\ISCC.exe" /DARCH=$script:TARGET_ARCH .\yollama.iss
     }
     if ($LASTEXITCODE -ne 0) { exit($LASTEXITCODE)}
 }
@@ -868,14 +868,14 @@ function newDependencyAuditJob($payloadDir, $label, $reportPath, $dependencyDirs
 }
 
 function stageComponents($mainDir, $stagingDir, $pattern, $readmePrefix) {
-    $components = Get-ChildItem -Path "${mainDir}\lib\ollama" -Directory -Filter $pattern -ErrorAction SilentlyContinue
+    $components = Get-ChildItem -Path "${mainDir}\lib\yollama" -Directory -Filter $pattern -ErrorAction SilentlyContinue
     if ($components) {
         Remove-Item -ea 0 -r $stagingDir
-        mkdir -Force -path "${stagingDir}\lib\ollama" | Out-Null
-        Write-Output "Extract this ${readmePrefix} zip file to the same location where you extracted ollama-windows-amd64.zip" > "${stagingDir}\README_${readmePrefix}.txt"
+        mkdir -Force -path "${stagingDir}\lib\yollama" | Out-Null
+        Write-Output "Extract this ${readmePrefix} zip file to the same location where you extracted yollama-windows-amd64.zip" > "${stagingDir}\README_${readmePrefix}.txt"
         foreach ($dir in $components) {
             Write-Output "  Staging $($dir.Name)"
-            Move-Item -path $dir.FullName -destination "${stagingDir}\lib\ollama\$($dir.Name)"
+            Move-Item -path $dir.FullName -destination "${stagingDir}\lib\yollama\$($dir.Name)"
         }
         return $true
     }
@@ -883,9 +883,9 @@ function stageComponents($mainDir, $stagingDir, $pattern, $readmePrefix) {
 }
 
 function restoreComponents($mainDir, $stagingDir) {
-    if (Test-Path -Path "${stagingDir}\lib\ollama") {
-        foreach ($dir in (Get-ChildItem -Path "${stagingDir}\lib\ollama" -Directory)) {
-            Move-Item -path $dir.FullName -destination "${mainDir}\lib\ollama\$($dir.Name)"
+    if (Test-Path -Path "${stagingDir}\lib\yollama") {
+        foreach ($dir in (Get-ChildItem -Path "${stagingDir}\lib\yollama" -Directory)) {
+            Move-Item -path $dir.FullName -destination "${mainDir}\lib\yollama\$($dir.Name)"
         }
     }
     Remove-Item -ea 0 -r $stagingDir
@@ -897,38 +897,38 @@ function zip {
     $amd64Dir = "${distDir}\windows-amd64"
 
     # Remove any stale zip files before starting
-    Remove-Item -ea 0 "${distDir}\ollama-windows-*.zip"
+    Remove-Item -ea 0 "${distDir}\yollama-windows-*.zip"
 
     try {
         if (Test-Path -Path $amd64Dir) {
             # Stage ROCm into its own directory for independent compression.
             if (stageComponents $amd64Dir "${distDir}\windows-amd64-rocm" "rocm_v*" "ROCm") {
-                Write-Output "Generating ${distDir}\ollama-windows-amd64-rocm.zip"
-                $jobs += newZipJob "${distDir}\windows-amd64-rocm" "${distDir}\ollama-windows-amd64-rocm.zip"
+                Write-Output "Generating ${distDir}\yollama-windows-amd64-rocm.zip"
+                $jobs += newZipJob "${distDir}\windows-amd64-rocm" "${distDir}\yollama-windows-amd64-rocm.zip"
                 $jobs += newDependencyAuditJob "${distDir}\windows-amd64-rocm" "windows-amd64-rocm" "${distDir}\dependency-audit-windows-amd64-rocm.txt" $amd64Dir
             }
 
             # Stage MLX into its own directory for independent compression
             if (stageComponents $amd64Dir "${distDir}\windows-amd64-mlx" "mlx_*" "MLX") {
-                Write-Output "Generating ${distDir}\ollama-windows-amd64-mlx.zip"
-                $jobs += newZipJob "${distDir}\windows-amd64-mlx" "${distDir}\ollama-windows-amd64-mlx.zip"
+                Write-Output "Generating ${distDir}\yollama-windows-amd64-mlx.zip"
+                $jobs += newZipJob "${distDir}\windows-amd64-mlx" "${distDir}\yollama-windows-amd64-mlx.zip"
                 $jobs += newDependencyAuditJob "${distDir}\windows-amd64-mlx" "windows-amd64-mlx" "${distDir}\dependency-audit-windows-amd64-mlx.txt" $amd64Dir
             }
 
             # Compress the main amd64 zip (without rocm/mlx)
-            Write-Output "Generating ${distDir}\ollama-windows-amd64.zip"
-            $jobs += newZipJob $amd64Dir "${distDir}\ollama-windows-amd64.zip"
+            Write-Output "Generating ${distDir}\yollama-windows-amd64.zip"
+            $jobs += newZipJob $amd64Dir "${distDir}\yollama-windows-amd64.zip"
             $jobs += newDependencyAuditJob $amd64Dir "windows-amd64" "${distDir}\dependency-audit-windows-amd64.txt"
         }
 
         $arm64Dir = "${distDir}\windows-arm64"
         if (Test-Path -Path $arm64Dir) {
-            if ((Test-Path -Path "${arm64Dir}\ollama.exe") -and (Test-Path -Path "${arm64Dir}\lib\ollama\llama-server.exe")) {
-                Write-Output "Generating ${distDir}\ollama-windows-arm64.zip"
-                $jobs += newZipJob $arm64Dir "${distDir}\ollama-windows-arm64.zip"
+            if ((Test-Path -Path "${arm64Dir}\yollama.exe") -and (Test-Path -Path "${arm64Dir}\lib\yollama\llama-server.exe")) {
+                Write-Output "Generating ${distDir}\yollama-windows-arm64.zip"
+                $jobs += newZipJob $arm64Dir "${distDir}\yollama-windows-arm64.zip"
                 $jobs += newDependencyAuditJob $arm64Dir "windows-arm64" "${distDir}\dependency-audit-windows-arm64.txt"
             } else {
-                Write-Output "Skipping ${distDir}\ollama-windows-arm64.zip; missing ARM64 ollama.exe or llama-server.exe"
+                Write-Output "Skipping ${distDir}\yollama-windows-arm64.zip; missing ARM64 yollama.exe or llama-server.exe"
             }
         }
 
@@ -967,7 +967,7 @@ try {
         rocm7
         vulkan
         mlxCuda13
-        ollama
+        yollama
         app
         cpuArm64
         ollamaArm64

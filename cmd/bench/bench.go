@@ -155,7 +155,7 @@ func fetchModelInfo(ctx context.Context, client *api.Client, model string) Model
 func fetchMemoryUsage(ctx context.Context, client *api.Client, model string) (size, vram int64) {
 	resp, err := client.ListRunning(ctx)
 	if err != nil {
-		if debug := os.Getenv("OLLAMA_DEBUG"); debug != "" {
+		if debug := os.Getenv("YOLLAMA_DEBUG"); debug != "" {
 			fmt.Fprintf(os.Stderr, "WARNING: Could not fetch memory usage: %v\n", err)
 		}
 		return 0, 0
@@ -276,7 +276,7 @@ func BenchmarkModel(fOpt flagOptions) error {
 
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: Couldn't create ollama client: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ERROR: Couldn't create yollama client: %v\n", err)
 		return err
 	}
 

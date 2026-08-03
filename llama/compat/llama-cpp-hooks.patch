@@ -6,7 +6,7 @@ index 4e65a45..a6e4fe2 100644
  #include "ggml.h"
  #include "gguf.h"
  #include "llama-hparams.h"
-+#include "llama-ollama-compat.h"
++#include "llama-yollama-compat.h"
  
  #include <algorithm>
  #include <array>
@@ -14,7 +14,7 @@ index 4e65a45..a6e4fe2 100644
          }
  
          get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
-+        if (llama_ollama_compat::translate_metadata(this, metadata, ctx, arch_name, fname.c_str())) use_mmap = false;
++        if (llama_yollama_compat::translate_metadata(this, metadata, ctx, arch_name, fname.c_str())) use_mmap = false;
          llm_kv = LLM_KV(llm_arch_from_string(arch_name));
  
          files.emplace_back(new llama_file(fname.c_str(), "rb", use_direct_io));
@@ -22,7 +22,7 @@ index 4e65a45..a6e4fe2 100644
          // so we build a unified tensors index for weights.
          for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
              std::string tensor_name = std::string(cur->name);
-+            if (llama_ollama_compat::should_skip_tensor(this, tensor_name.c_str())) {
++            if (llama_yollama_compat::should_skip_tensor(this, tensor_name.c_str())) {
 +                continue;
 +            }
              // make sure there is no duplicated tensor names
@@ -32,7 +32,7 @@ index 4e65a45..a6e4fe2 100644
          // Save tensors data offset info of the main file.
          for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
              std::string tensor_name = std::string(cur->name);
-+            if (llama_ollama_compat::should_skip_tensor(this, tensor_name.c_str())) {
++            if (llama_yollama_compat::should_skip_tensor(this, tensor_name.c_str())) {
 +                continue;
 +            }
              // make sure there is no duplicated tensor names
@@ -42,7 +42,7 @@ index 4e65a45..a6e4fe2 100644
  
  void llama_model_loader::load_data_for(struct ggml_tensor * cur) const {
      const auto & w = require_weight(ggml_get_name(cur));
-+    if (llama_ollama_compat::maybe_load_text_tensor(this, cur, w.offs)) return;
++    if (llama_yollama_compat::maybe_load_text_tensor(this, cur, w.offs)) return;
  
      if (use_mmap) {
          const auto & mapping = mappings.at(w.idx);
@@ -50,7 +50,7 @@ index 4e65a45..a6e4fe2 100644
          }
  
          size_t n_size = ggml_nbytes(cur);
-+        if (llama_ollama_compat::maybe_load_text_tensor(this, cur, weight->offs)) continue;
++        if (llama_yollama_compat::maybe_load_text_tensor(this, cur, weight->offs)) continue;
  
          if (use_mmap) {
              const auto & mapping = mappings.at(weight->idx);
@@ -62,7 +62,7 @@ index 2e0cfa6..a0f2955 100644
  #include "ggml-backend.h"
  #include "gguf.h"
  
-+#include "llama-ollama-compat.h"
++#include "llama-yollama-compat.h"
 +
  #include <algorithm>
  #include <cassert>
@@ -71,10 +71,10 @@ index 2e0cfa6..a0f2955 100644
  
          ctx_meta.reset(meta);
  
-+        // If this is an Ollama-format monolithic GGUF (text + embedded
++        // If this is an Yollama-format monolithic GGUF (text + embedded
 +        // vision), translate its metadata and tensor names into the
 +        // upstream mmproj shape so the rest of this loader runs unchanged.
-+        llama_ollama_compat::translate_clip_metadata(ctx_gguf.get(), meta);
++        llama_yollama_compat::translate_clip_metadata(ctx_gguf.get(), meta);
 +
          const int n_tensors = gguf_get_n_tensors(ctx_gguf.get());
  
@@ -83,7 +83,7 @@ index 2e0cfa6..a0f2955 100644
                  auto it_off = tensor_offset.find(t->name);
                  GGML_ASSERT(it_off != tensor_offset.end() && "no offset for tensor");
                  const size_t offset = it_off->second;
-+                if (llama_ollama_compat::maybe_load_tensor(cur, fname.c_str(), offset, buft)) continue;
++                if (llama_yollama_compat::maybe_load_tensor(cur, fname.c_str(), offset, buft)) continue;
                  fin.seekg(offset, std::ios::beg);
                  if (!fin) {
                      throw std::runtime_error(string_format("%s: failed to seek for tensor %s\n", __func__, t->name));

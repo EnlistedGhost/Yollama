@@ -33,7 +33,7 @@ mkdir -p dist
 docker buildx build \
         --output type=local,dest=./dist/ \
         --platform=${PLATFORM} \
-        ${OLLAMA_COMMON_BUILD_ARGS} \
+        ${YOLLAMA_COMMON_BUILD_ARGS} \
         --target archive \
         -f Dockerfile \
         .
@@ -49,24 +49,24 @@ fi
 # buildx behavior changes for single vs. multiplatform
 echo "Compressing linux tar bundles..."
 if echo $PLATFORM | grep "," > /dev/null ; then
-        tar c -C ./dist/linux_arm64 --exclude cuda_jetpack5 --exclude cuda_jetpack6 . | zstd -9 -T0 >./dist/ollama-linux-arm64.tar.zst
-        tar c -C ./dist/linux_arm64 ./lib/ollama/cuda_jetpack5  | zstd -9 -T0 >./dist/ollama-linux-arm64-jetpack5.tar.zst
-        tar c -C ./dist/linux_arm64 ./lib/ollama/cuda_jetpack6  | zstd -9 -T0 >./dist/ollama-linux-arm64-jetpack6.tar.zst
-        tar c -C ./dist/linux_amd64 --exclude './lib/ollama/rocm*' --exclude './lib/ollama/mlx*' --exclude './lib/ollama/include' . | zstd -9 -T0 >./dist/ollama-linux-amd64.tar.zst
-        ( cd ./dist/linux_amd64 && tar c lib/ollama/rocm_v* ) | zstd -9 -T0 >./dist/ollama-linux-amd64-rocm.tar.zst
-        ( cd ./dist/linux_amd64 && if [ -e lib/ollama/include ]; then tar c lib/ollama/mlx* lib/ollama/include; else tar c lib/ollama/mlx*; fi ) | zstd -9 -T0 >./dist/ollama-linux-amd64-mlx.tar.zst
+        tar c -C ./dist/linux_arm64 --exclude cuda_jetpack5 --exclude cuda_jetpack6 . | zstd -9 -T0 >./dist/yollama-linux-arm64.tar.zst
+        tar c -C ./dist/linux_arm64 ./lib/yollama/cuda_jetpack5  | zstd -9 -T0 >./dist/yollama-linux-arm64-jetpack5.tar.zst
+        tar c -C ./dist/linux_arm64 ./lib/yollama/cuda_jetpack6  | zstd -9 -T0 >./dist/yollama-linux-arm64-jetpack6.tar.zst
+        tar c -C ./dist/linux_amd64 --exclude './lib/yollama/rocm*' --exclude './lib/yollama/mlx*' --exclude './lib/yollama/include' . | zstd -9 -T0 >./dist/yollama-linux-amd64.tar.zst
+        ( cd ./dist/linux_amd64 && tar c lib/yollama/rocm_v* ) | zstd -9 -T0 >./dist/yollama-linux-amd64-rocm.tar.zst
+        ( cd ./dist/linux_amd64 && if [ -e lib/yollama/include ]; then tar c lib/yollama/mlx* lib/yollama/include; else tar c lib/yollama/mlx*; fi ) | zstd -9 -T0 >./dist/yollama-linux-amd64-mlx.tar.zst
 elif echo $PLATFORM | grep "arm64" > /dev/null ; then
-        tar c -C ./dist/ --exclude cuda_jetpack5 --exclude cuda_jetpack6 bin lib | zstd -9 -T0 >./dist/ollama-linux-arm64.tar.zst
-        tar c -C ./dist/ ./lib/ollama/cuda_jetpack5  | zstd -9 -T0 >./dist/ollama-linux-arm64-jetpack5.tar.zst
-        tar c -C ./dist/ ./lib/ollama/cuda_jetpack6  | zstd -9 -T0 >./dist/ollama-linux-arm64-jetpack6.tar.zst
+        tar c -C ./dist/ --exclude cuda_jetpack5 --exclude cuda_jetpack6 bin lib | zstd -9 -T0 >./dist/yollama-linux-arm64.tar.zst
+        tar c -C ./dist/ ./lib/yollama/cuda_jetpack5  | zstd -9 -T0 >./dist/yollama-linux-arm64-jetpack5.tar.zst
+        tar c -C ./dist/ ./lib/yollama/cuda_jetpack6  | zstd -9 -T0 >./dist/yollama-linux-arm64-jetpack6.tar.zst
 elif echo $PLATFORM | grep "amd64" > /dev/null ; then
-        tar c -C ./dist/ --exclude 'lib/ollama/rocm*' --exclude 'lib/ollama/mlx*' --exclude 'lib/ollama/include' bin lib | zstd -9 -T0 >./dist/ollama-linux-amd64.tar.zst
-        ( cd ./dist/ && tar c lib/ollama/rocm_v* ) | zstd -9 -T0 >./dist/ollama-linux-amd64-rocm.tar.zst
-        ( cd ./dist/ && if [ -e lib/ollama/include ]; then tar c lib/ollama/mlx* lib/ollama/include; else tar c lib/ollama/mlx*; fi ) | zstd -9 -T0 >./dist/ollama-linux-amd64-mlx.tar.zst
+        tar c -C ./dist/ --exclude 'lib/yollama/rocm*' --exclude 'lib/yollama/mlx*' --exclude 'lib/yollama/include' bin lib | zstd -9 -T0 >./dist/yollama-linux-amd64.tar.zst
+        ( cd ./dist/ && tar c lib/yollama/rocm_v* ) | zstd -9 -T0 >./dist/yollama-linux-amd64-rocm.tar.zst
+        ( cd ./dist/ && if [ -e lib/yollama/include ]; then tar c lib/yollama/mlx* lib/yollama/include; else tar c lib/yollama/mlx*; fi ) | zstd -9 -T0 >./dist/yollama-linux-amd64-mlx.tar.zst
 fi
 
 LIMIT=2147483648
-for f in ./dist/ollama-linux-*.tar.zst; do
+for f in ./dist/yollama-linux-*.tar.zst; do
     [ -f "$f" ] || continue
     size=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f")
     if [ "$size" -gt "$LIMIT" ]; then

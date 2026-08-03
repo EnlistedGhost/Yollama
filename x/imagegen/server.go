@@ -30,7 +30,7 @@ import (
 
 // Server wraps an MLX runner subprocess to implement llm.LlamaServer.
 //
-// This implementation is compatible with Ollama's scheduler and can be loaded/unloaded
+// This implementation is compatible with Yollama's scheduler and can be loaded/unloaded
 // like any other model. It is used for image generation models.
 type Server struct {
 	mu          sync.Mutex
@@ -112,7 +112,7 @@ func (s *Server) Load(ctx context.Context, _ ml.SystemInfo, gpus []ml.DeviceInfo
 		exe = eval
 	}
 
-	// Spawn subprocess: ollama runner --imagegen-engine --model <path> --port <port>
+	// Spawn subprocess: yollama runner --imagegen-engine --model <path> --port <port>
 	cmd := exec.Command(exe, "runner", "--imagegen-engine", "--model", s.modelName, "--port", strconv.Itoa(port))
 	cmd.Env = os.Environ()
 	configureMLXSubprocessEnv(cmd, ml.LibraryPaths(gpus))
@@ -188,7 +188,7 @@ func configureMLXSubprocessEnv(cmd *exec.Cmd, libraryPaths []string) {
 	}
 
 	// Search order for the imagegen runner is:
-	//   1. bundled lib/ollama root
+	//   1. bundled lib/yollama root
 	//   2. backend-specific library dirs selected during GPU discovery
 	//   3. any existing caller-provided library path values
 	pathEnv := mlxLibraryPathEnv()
@@ -200,11 +200,11 @@ func configureMLXSubprocessEnv(cmd *exec.Cmd, libraryPaths []string) {
 	slog.Debug("mlx subprocess library path", pathEnv, strings.Join(pathEnvPaths, string(filepath.ListSeparator)))
 
 	ollamaLibraryPaths := append([]string{}, libraryPaths...)
-	if existingPath, ok := os.LookupEnv("OLLAMA_LIBRARY_PATH"); ok {
+	if existingPath, ok := os.LookupEnv("YOLLAMA_LIBRARY_PATH"); ok {
 		ollamaLibraryPaths = append(ollamaLibraryPaths, filepath.SplitList(existingPath)...)
 	}
-	setSubprocessEnv(cmd, "OLLAMA_LIBRARY_PATH", strings.Join(ollamaLibraryPaths, string(filepath.ListSeparator)))
-	slog.Debug("mlx subprocess library path", "OLLAMA_LIBRARY_PATH", strings.Join(ollamaLibraryPaths, string(filepath.ListSeparator)))
+	setSubprocessEnv(cmd, "YOLLAMA_LIBRARY_PATH", strings.Join(ollamaLibraryPaths, string(filepath.ListSeparator)))
+	slog.Debug("mlx subprocess library path", "YOLLAMA_LIBRARY_PATH", strings.Join(ollamaLibraryPaths, string(filepath.ListSeparator)))
 }
 
 func setSubprocessEnv(cmd *exec.Cmd, key, value string) {

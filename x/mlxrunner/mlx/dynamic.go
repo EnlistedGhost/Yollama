@@ -69,11 +69,11 @@ func tryLoadFromDir(dir string) bool {
 	return false
 }
 
-// libOllamaRoots returns candidate directories for MLX dynamic libraries.
-// Production: exe_dir/lib/ollama (Windows release layout),
-// exe_dir/../lib/ollama (standard bin/lib layout), and exe_dir (macOS bundle).
-// Development: build/lib/ollama and build/*/lib/ollama.
-func libOllamaRoots() []string {
+// libYollamaRoots returns candidate directories for MLX dynamic libraries.
+// Production: exe_dir/lib/yollama (Windows release layout),
+// exe_dir/../lib/yollama (standard bin/lib layout), and exe_dir (macOS bundle).
+// Development: build/lib/yollama and build/*/lib/yollama.
+func libYollamaRoots() []string {
 	var roots []string
 
 	// Production paths relative to executable
@@ -84,28 +84,28 @@ func libOllamaRoots() []string {
 		exeDir := filepath.Dir(exe)
 		switch runtime.GOOS {
 		case "darwin":
-			roots = append(roots, filepath.Join(exeDir, "lib", "ollama"))
-			roots = append(roots, filepath.Join(exeDir, "..", "lib", "ollama"))
+			roots = append(roots, filepath.Join(exeDir, "lib", "yollama"))
+			roots = append(roots, filepath.Join(exeDir, "..", "lib", "yollama"))
 			roots = append(roots, exeDir) // app bundle: Contents/Resources/
 		case "linux":
-			roots = append(roots, filepath.Join(exeDir, "..", "lib", "ollama"))
+			roots = append(roots, filepath.Join(exeDir, "..", "lib", "yollama"))
 		case "windows":
-			roots = append(roots, filepath.Join(exeDir, "lib", "ollama"))
-			roots = append(roots, filepath.Join(exeDir, "..", "lib", "ollama"))
+			roots = append(roots, filepath.Join(exeDir, "lib", "yollama"))
+			roots = append(roots, filepath.Join(exeDir, "..", "lib", "yollama"))
 		}
 	}
 
-	// Development paths: build/lib/ollama and build/*/lib/ollama.
+	// Development paths: build/lib/yollama and build/*/lib/yollama.
 	// Reverse-sort and filter the glob results so higher-versioned Metal
 	// builds (e.g., metal-v4) are tried before lower ones (metal-v3),
 	// and incompatible variants are skipped. Without this, alphabetical
 	// order would always pick v3 over v4 in dev builds.
 	for _, base := range repoBuildDirs() {
-		roots = append(roots, filepath.Join(base, "lib", "ollama"))
-		if matches, err := filepath.Glob(filepath.Join(base, "*", "lib", "ollama")); err == nil {
+		roots = append(roots, filepath.Join(base, "lib", "yollama"))
+		if matches, err := filepath.Glob(filepath.Join(base, "*", "lib", "yollama")); err == nil {
 			sort.Sort(sort.Reverse(sort.StringSlice(matches)))
 			for _, m := range matches {
-				// Extract the build dir name (e.g., "metal-v4" from "build/metal-v4/lib/ollama")
+				// Extract the build dir name (e.g., "metal-v4" from "build/metal-v4/lib/yollama")
 				rel, _ := filepath.Rel(base, m)
 				variant := strings.SplitN(rel, string(filepath.Separator), 2)[0]
 				if isCompatibleMLXVariant(variant) {
@@ -167,17 +167,17 @@ func init() {
 		return
 	}
 
-	// OLLAMA_LLM_LIBRARY overrides variant selection (e.g., "mlx_metal_v3").
+	// YOLLAMA_LLM_LIBRARY overrides variant selection (e.g., "mlx_metal_v3").
 	// When set to an mlx_* value, only that specific subdir is tried.
 	// The GGML runner ignores mlx_* values (see discover/runner.go).
-	forcedVariant, _ := os.LookupEnv("OLLAMA_LLM_LIBRARY")
+	forcedVariant, _ := os.LookupEnv("YOLLAMA_LLM_LIBRARY")
 	if forcedVariant != "" && !strings.HasPrefix(forcedVariant, "mlx_") {
 		forcedVariant = "" // not an MLX variant, ignore
 	}
 
 	found := findMLXLibrary(forcedVariant)
 	if !found {
-		initError = fmt.Errorf("failed to load MLX dynamic library (searched: %v)", libOllamaRoots())
+		initError = fmt.Errorf("failed to load MLX dynamic library (searched: %v)", libYollamaRoots())
 		return
 	}
 
@@ -185,7 +185,7 @@ func init() {
 }
 
 func findMLXLibrary(forcedVariant string) bool {
-	for _, root := range libOllamaRoots() {
+	for _, root := range libYollamaRoots() {
 		if forcedVariant != "" {
 			if tryLoadFromDir(filepath.Join(root, forcedVariant)) {
 				return true

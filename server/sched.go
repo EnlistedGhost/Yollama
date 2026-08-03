@@ -43,11 +43,11 @@ type LlmRequest struct {
 	// evict-all-and-retry. Prevents infinite retry on persistent load failures.
 	oomRetryAttempted bool
 
-	// numCtxAuto is true when NumCtx came from Ollama's automatic VRAM-tier
+	// numCtxAuto is true when NumCtx came from Yollama's automatic VRAM-tier
 	// default rather than explicit request, model, or environment config.
 	numCtxAuto bool
 
-	// numBatchAuto is true when NumBatch came from Ollama's default options
+	// numBatchAuto is true when NumBatch came from Yollama's default options
 	// rather than an explicit request or model option.
 	numBatchAuto bool
 
@@ -285,7 +285,7 @@ func (s *Scheduler) processPending(ctx context.Context) {
 						} else {
 						maxRunners = uint(defaultModelsPerGPU * max(len(gpus), 1))
 						}
-						slog.Debug("updating default concurrency", "OLLAMA_MAX_LOADED_MODELS", maxRunners, "gpu_count", len(gpus))
+						slog.Debug("updating default concurrency", "YOLLAMA_MAX_LOADED_MODELS", maxRunners, "gpu_count", len(gpus))
 					}
 
 					// Update free memory from currently loaded models
@@ -496,9 +496,9 @@ func getPathBatchNumConfig() (string, error) {
 		log.Fatalf("Error no such directory found: %v", err)
 	}
 
-	// 2. Safely join the home directory with the .ollama folder
-	ollamaPath := filepath.Join(homeUserDir, ".ollama")
-	fmt.Println("Xllama directory:", ollamaPath)
+	// 2. Safely join the home directory with the .yollama folder
+	ollamaPath := filepath.Join(homeUserDir, ".yollama")
+	fmt.Println("Yollama directory:", ollamaPath)
 	
 	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "ollamaloader.conf")
 	return pathSchedBatchNumConfig, err
@@ -619,7 +619,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 				// show a generalized compatibility error until there is a better way to
 				// check for model compatibility
 				if errors.Is(err, ggml.ErrUnsupportedFormat) || strings.Contains(err.Error(), "failed to load model") {
-					err = fmt.Errorf("%v: this model may be incompatible with your version of Ollama. If you previously pulled this model, try updating it by running `ollama pull %s`", err, req.model.ShortName)
+					err = fmt.Errorf("%v: this model may be incompatible with your version of Yollama. If you previously pulled this model, try updating it by running `yollama pull %s`", err, req.model.ShortName)
 				}
 			}
 		} else {
@@ -941,7 +941,7 @@ func availableMemoryForLoad(systemInfo ml.SystemInfo, gpus []ml.DeviceInfo) (ava
 	}
 
 	// On iGPUs, GPU free memory can be a static or slowly refreshed device
-	// baseline. updateFreeSpace has already subtracted known Ollama runner
+	// baseline. updateFreeSpace has already subtracted known Yollama runner
 	// allocations from that baseline. Current system free memory is a separate
 	// live measurement that already includes those loaded runners, so use the
 	// smaller value for shared-memory GPUs without discounting discrete VRAM.

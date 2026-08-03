@@ -1,30 +1,30 @@
 include(FetchContent)
 
-if(NOT DEFINED OLLAMA_SOURCE_DIR OR "${OLLAMA_SOURCE_DIR}" STREQUAL "")
-    set(OLLAMA_SOURCE_DIR "${CMAKE_SOURCE_DIR}" CACHE PATH "Ollama repository root")
+if(NOT DEFINED YOLLAMA_SOURCE_DIR OR "${YOLLAMA_SOURCE_DIR}" STREQUAL "")
+    set(YOLLAMA_SOURCE_DIR "${CMAKE_SOURCE_DIR}" CACHE PATH "Yollama repository root")
 endif()
-get_filename_component(OLLAMA_SOURCE_DIR "${OLLAMA_SOURCE_DIR}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+get_filename_component(YOLLAMA_SOURCE_DIR "${YOLLAMA_SOURCE_DIR}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
 
 # Read MLX-C version from top-level file (shared with Dockerfile)
-file(READ "${OLLAMA_SOURCE_DIR}/MLX_C_VERSION" MLX_C_GIT_TAG)
+file(READ "${YOLLAMA_SOURCE_DIR}/MLX_C_VERSION" MLX_C_GIT_TAG)
 string(STRIP "${MLX_C_GIT_TAG}" MLX_C_GIT_TAG)
 
 # Read MLX version from top-level file
-file(READ "${OLLAMA_SOURCE_DIR}/MLX_VERSION" MLX_GIT_TAG)
+file(READ "${YOLLAMA_SOURCE_DIR}/MLX_VERSION" MLX_GIT_TAG)
 string(STRIP "${MLX_GIT_TAG}" MLX_GIT_TAG)
 
 set(MLX_C_BUILD_EXAMPLES OFF)
 
 set(MLX_BUILD_GGUF OFF)
 set(MLX_BUILD_SAFETENSORS ON)
-option(OLLAMA_MLX_GENERATE_WRAPPERS "Regenerate MLX Go wrappers" ON)
+option(YOLLAMA_MLX_GENERATE_WRAPPERS "Regenerate MLX Go wrappers" ON)
 
 function(set_target_output_directory _target)
     if(TARGET ${_target})
         set_target_properties(${_target} PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY ${OLLAMA_BUILD_DIR}
-            LIBRARY_OUTPUT_DIRECTORY ${OLLAMA_BUILD_DIR}
-            ARCHIVE_OUTPUT_DIRECTORY ${OLLAMA_BUILD_DIR}
+            RUNTIME_OUTPUT_DIRECTORY ${YOLLAMA_BUILD_DIR}
+            LIBRARY_OUTPUT_DIRECTORY ${YOLLAMA_BUILD_DIR}
+            ARCHIVE_OUTPUT_DIRECTORY ${YOLLAMA_BUILD_DIR}
         )
     endif()
 endfunction()
@@ -87,13 +87,13 @@ endif()
 
 # Allow local source overrides via environment variables
 # Resolve to absolute paths so FetchContent doesn't break on relative dirs.
-if(DEFINED ENV{OLLAMA_MLX_SOURCE})
-    get_filename_component(_mlx_src "$ENV{OLLAMA_MLX_SOURCE}" ABSOLUTE BASE_DIR "${OLLAMA_SOURCE_DIR}")
+if(DEFINED ENV{YOLLAMA_MLX_SOURCE})
+    get_filename_component(_mlx_src "$ENV{YOLLAMA_MLX_SOURCE}" ABSOLUTE BASE_DIR "${YOLLAMA_SOURCE_DIR}")
     set(FETCHCONTENT_SOURCE_DIR_MLX "${_mlx_src}" CACHE PATH "" FORCE)
     message(STATUS "Using local MLX source: ${_mlx_src}")
 endif()
-if(DEFINED ENV{OLLAMA_MLX_C_SOURCE})
-    get_filename_component(_mlx_c_src "$ENV{OLLAMA_MLX_C_SOURCE}" ABSOLUTE BASE_DIR "${OLLAMA_SOURCE_DIR}")
+if(DEFINED ENV{YOLLAMA_MLX_C_SOURCE})
+    get_filename_component(_mlx_c_src "$ENV{YOLLAMA_MLX_C_SOURCE}" ABSOLUTE BASE_DIR "${YOLLAMA_SOURCE_DIR}")
     set(FETCHCONTENT_SOURCE_DIR_MLX-C "${_mlx_c_src}" CACHE PATH "" FORCE)
     message(STATUS "Using local MLX-C source: ${_mlx_c_src}")
 endif()
@@ -155,14 +155,14 @@ if(CMAKE_GENERATOR STREQUAL "Ninja")
 endif()
 
 # Sync vendored headers with fetched version.
-if(OLLAMA_MLX_GENERATE_WRAPPERS)
+if(YOLLAMA_MLX_GENERATE_WRAPPERS)
     file(GLOB _mlx_c_hdrs "${mlx-c_SOURCE_DIR}/mlx/c/*.h")
-    file(COPY ${_mlx_c_hdrs} DESTINATION "${OLLAMA_SOURCE_DIR}/x/mlxrunner/mlx/include/mlx/c/")
+    file(COPY ${_mlx_c_hdrs} DESTINATION "${YOLLAMA_SOURCE_DIR}/x/mlxrunner/mlx/include/mlx/c/")
 endif()
 
 # Regenerate Go/C shim wrappers from the (possibly updated) headers.
 # Skip during cross-compilation — the generated files are arch-independent.
-if(OLLAMA_MLX_GENERATE_WRAPPERS AND (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR OR NOT APPLE))
+if(YOLLAMA_MLX_GENERATE_WRAPPERS AND (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR OR NOT APPLE))
     find_program(GO_EXECUTABLE go REQUIRED)
     message(STATUS "Regenerating MLX Go wrappers")
 
@@ -181,14 +181,14 @@ if(OLLAMA_MLX_GENERATE_WRAPPERS AND (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_
 
     execute_process(
         COMMAND ${GO_EXECUTABLE} generate ./x/...
-        WORKING_DIRECTORY ${OLLAMA_SOURCE_DIR}
+        WORKING_DIRECTORY ${YOLLAMA_SOURCE_DIR}
         COMMAND_ERROR_IS_FATAL ANY
     )
 
     set(ENV{CC} "${_SAVE_CC}")
     set(ENV{CGO_CFLAGS} "${_SAVE_CGO_CFLAGS}")
     set(ENV{CGO_CXXFLAGS} "${_SAVE_CGO_CXXFLAGS}")
-elseif(NOT OLLAMA_MLX_GENERATE_WRAPPERS)
+elseif(NOT YOLLAMA_MLX_GENERATE_WRAPPERS)
     message(STATUS "Skipping MLX Go wrapper generation")
 else()
     message(STATUS "Skipping MLX Go wrapper generation (cross-compiling)")

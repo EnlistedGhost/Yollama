@@ -23,12 +23,12 @@ fi
 echo "Deduplicating CUDA libraries in ${base_dir}..."
 
 # Find all mlx_cuda_* directories
-for mlx_dir in "${base_dir}"/lib/ollama/mlx_cuda_*; do
+for mlx_dir in "${base_dir}"/lib/yollama/mlx_cuda_*; do
     [ -d "${mlx_dir}" ] || continue
 
     # Extract CUDA version (e.g., v12, v13)
     cuda_version=$(basename "${mlx_dir}" | sed 's/mlx_cuda_//')
-    cuda_dir="${base_dir}/lib/ollama/cuda_${cuda_version}"
+    cuda_dir="${base_dir}/lib/yollama/cuda_${cuda_version}"
 
     # Skip if corresponding cuda_* directory doesn't exist
     [ -d "${cuda_dir}" ] || continue

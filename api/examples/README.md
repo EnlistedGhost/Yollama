@@ -1,4 +1,4 @@
-# Ollama API Examples
+# Yollama API Examples
 
 Run the examples in this directory with:
 

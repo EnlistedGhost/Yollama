@@ -52,7 +52,7 @@ func (r *Qwen35Renderer) renderContent(content api.Message, imageOffset int) (st
 		return renderContentWithImageTags(content.Content, len(content.Images), imageOffset)
 	}
 
-	// This assumes all images are at the front of the message - same assumption as ollama/ollama/runner.go
+	// This assumes all images are at the front of the message - same assumption as yollama/yollama/runner.go
 	var subSb strings.Builder
 	for range content.Images {
 		subSb.WriteString("<|vision_start|><|image_pad|><|vision_end|>")

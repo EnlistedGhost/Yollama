@@ -12,7 +12,7 @@ import (
 )
 
 type llamaCppBinarySearch struct {
-	libOllamaPath string
+	libYollamaPath string
 	executable    string
 	workingDir    string
 	goos          string
@@ -29,7 +29,7 @@ func defaultLlamaCppBinarySearch() llamaCppBinarySearch {
 
 	workingDir, _ := os.Getwd()
 	return llamaCppBinarySearch{
-		libOllamaPath: ml.LibOllamaPath,
+		libYollamaPath: ml.LibYollamaPath,
 		executable:    executable,
 		workingDir:    workingDir,
 		goos:          runtime.GOOS,
@@ -82,7 +82,7 @@ func llamaCppBinaryCandidates(name string, search llamaCppBinarySearch) []string
 		}
 	}
 
-	add(search.libOllamaPath)
+	add(search.libYollamaPath)
 
 	addPackagedLayoutDirs := func(base string) {
 		if base == "" {
@@ -90,23 +90,23 @@ func llamaCppBinaryCandidates(name string, search llamaCppBinarySearch) []string
 		}
 		switch goos {
 		case "darwin":
-			// macOS tarballs and apps colocate llama.cpp helpers with ollama.
+			// macOS tarballs and apps colocate llama.cpp helpers with yollama.
 			add(base)
-			// Per-architecture local dist output keeps helpers under lib/ollama.
-			add(filepath.Join(base, "lib", "ollama"))
-			// Standard CMake installs put ollama in bin/ and helpers in ../lib/ollama/.
-			add(filepath.Join(base, "..", "lib", "ollama"))
+			// Per-architecture local dist output keeps helpers under lib/yollama.
+			add(filepath.Join(base, "lib", "yollama"))
+			// Standard CMake installs put yollama in bin/ and helpers in ../lib/yollama/.
+			add(filepath.Join(base, "..", "lib", "yollama"))
 		case "linux":
-			// Linux packages install ollama in bin/ and helpers in ../lib/ollama/.
-			add(filepath.Join(base, "..", "lib", "ollama"))
+			// Linux packages install yollama in bin/ and helpers in ../lib/yollama/.
+			add(filepath.Join(base, "..", "lib", "yollama"))
 		case "windows":
-			// Windows packages keep ollama.exe at top level with lib/ as a peer.
-			add(filepath.Join(base, "lib", "ollama"))
-			// Standard CMake installs put ollama.exe in bin/ and helpers in ../lib/ollama/.
-			add(filepath.Join(base, "..", "lib", "ollama"))
+			// Windows packages keep yollama.exe at top level with lib/ as a peer.
+			add(filepath.Join(base, "lib", "yollama"))
+			// Standard CMake installs put yollama.exe in bin/ and helpers in ../lib/yollama/.
+			add(filepath.Join(base, "..", "lib", "yollama"))
 		default:
-			add(filepath.Join(base, "lib", "ollama"))
-			add(filepath.Join(base, "..", "lib", "ollama"))
+			add(filepath.Join(base, "lib", "yollama"))
+			add(filepath.Join(base, "..", "lib", "yollama"))
 		}
 	}
 
@@ -114,10 +114,10 @@ func llamaCppBinaryCandidates(name string, search llamaCppBinarySearch) []string
 		if base == "" {
 			return
 		}
-		add(filepath.Join(base, "build", "lib", "ollama"))
-		add(filepath.Join(base, "dist", goos+"-"+goarch, "lib", "ollama"))
+		add(filepath.Join(base, "build", "lib", "yollama"))
+		add(filepath.Join(base, "dist", goos+"-"+goarch, "lib", "yollama"))
 		if goos+"_"+goarch != goos+"-"+goarch {
-			add(filepath.Join(base, "dist", goos+"_"+goarch, "lib", "ollama"))
+			add(filepath.Join(base, "dist", goos+"_"+goarch, "lib", "yollama"))
 		}
 		if goos == "darwin" {
 			add(filepath.Join(base, "dist", "darwin"))

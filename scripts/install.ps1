@@ -1,41 +1,41 @@
 <#
 .SYNOPSIS
-    Install, upgrade, or uninstall Ollama on Windows.
+    Install, upgrade, or uninstall Yollama on Windows.
 
 .DESCRIPTION
-    Downloads and installs Ollama.
+    Downloads and installs Yollama.
 
     Quick install:
 
-        irm https://ollama.com/install.ps1 | iex
+        irm https://yollama.com/install.ps1 | iex
 
     Specific version:
 
-        $env:OLLAMA_VERSION="0.5.7"; irm https://ollama.com/install.ps1 | iex
+        $env:YOLLAMA_VERSION="0.5.7"; irm https://yollama.com/install.ps1 | iex
 
     Custom install directory:
 
-        $env:OLLAMA_INSTALL_DIR="D:\Ollama"; irm https://ollama.com/install.ps1 | iex
+        $env:YOLLAMA_INSTALL_DIR="D:\Yollama"; irm https://yollama.com/install.ps1 | iex
 
     Uninstall:
 
-        $env:OLLAMA_UNINSTALL=1; irm https://ollama.com/install.ps1 | iex
+        $env:YOLLAMA_UNINSTALL=1; irm https://yollama.com/install.ps1 | iex
 
     Environment variables:
 
-        OLLAMA_VERSION       Target version (default: latest stable)
-        OLLAMA_INSTALL_DIR   Custom install directory
-        OLLAMA_UNINSTALL     Set to 1 to uninstall Ollama
-        OLLAMA_DEBUG         Enable verbose output
+        YOLLAMA_VERSION       Target version (default: latest stable)
+        YOLLAMA_INSTALL_DIR   Custom install directory
+        YOLLAMA_UNINSTALL     Set to 1 to uninstall Yollama
+        YOLLAMA_DEBUG         Enable verbose output
 
 .EXAMPLE
-    irm https://ollama.com/install.ps1 | iex
+    irm https://yollama.com/install.ps1 | iex
 
 .EXAMPLE
-    $env:OLLAMA_VERSION = "0.5.7"; irm https://ollama.com/install.ps1 | iex
+    $env:YOLLAMA_VERSION = "0.5.7"; irm https://yollama.com/install.ps1 | iex
 
 .LINK
-    https://ollama.com
+    https://yollama.com
 #>
 
 $ErrorActionPreference = "Stop"
@@ -45,17 +45,17 @@ $ProgressPreference = "SilentlyContinue"
 # Configuration from environment variables
 # --------------------------------------------------------------------------
 
-$Version      = if ($env:OLLAMA_VERSION) { $env:OLLAMA_VERSION } else { "" }
-$InstallDir   = if ($env:OLLAMA_INSTALL_DIR) { $env:OLLAMA_INSTALL_DIR } else { "" }
-$Uninstall    = $env:OLLAMA_UNINSTALL -eq "1"
-$DebugInstall = [bool]$env:OLLAMA_DEBUG
+$Version      = if ($env:YOLLAMA_VERSION) { $env:YOLLAMA_VERSION } else { "" }
+$InstallDir   = if ($env:YOLLAMA_INSTALL_DIR) { $env:YOLLAMA_INSTALL_DIR } else { "" }
+$Uninstall    = $env:YOLLAMA_UNINSTALL -eq "1"
+$DebugInstall = [bool]$env:YOLLAMA_DEBUG
 
 # --------------------------------------------------------------------------
 # Constants
 # --------------------------------------------------------------------------
 
-# OLLAMA_DOWNLOAD_URL for developer testing only
-$DownloadBaseURL = if ($env:OLLAMA_DOWNLOAD_URL) { $env:OLLAMA_DOWNLOAD_URL.TrimEnd('/') } else { "https://ollama.com/download" }
+# YOLLAMA_DOWNLOAD_URL for developer testing only
+$DownloadBaseURL = if ($env:YOLLAMA_DOWNLOAD_URL) { $env:YOLLAMA_DOWNLOAD_URL.TrimEnd('/') } else { "https://yollama.com/download" }
 $InnoSetupUninstallGuid = "{44E83376-CE68-45EB-8FC1-393500EB558C}_is1"
 
 # --------------------------------------------------------------------------
@@ -81,10 +81,10 @@ function Test-Signature {
         return $false
     }
 
-    # Verify it's signed by Ollama Inc. (check exact organization name)
-    # Anchor with comma/boundary to prevent "O=Not Ollama Inc." from matching
+    # Verify it's signed by Yollama Inc. (check exact organization name)
+    # Anchor with comma/boundary to prevent "O=Not Yollama Inc." from matching
     $subject = $sig.SignerCertificate.Subject
-    if ($subject -notmatch "(^|, )O=Ollama Inc\.(,|$)") {
+    if ($subject -notmatch "(^|, )O=Yollama Inc\.(,|$)") {
         Write-Status "  Unexpected signer: $subject"
         return $false
     }
@@ -111,11 +111,11 @@ function Find-InnoSetupInstall {
 }
 
 function Update-SessionPath {
-    # Update PATH in current session so 'ollama' works immediately
+    # Update PATH in current session so 'yollama' works immediately
     if ($InstallDir) {
         $ollamaDir = $InstallDir
     } else {
-        $ollamaDir = Join-Path $env:LOCALAPPDATA "Programs\Ollama"
+        $ollamaDir = Join-Path $env:LOCALAPPDATA "Programs\Yollama"
     }
 
     # Add to PATH if not already present
@@ -204,11 +204,11 @@ function Invoke-Download {
 # --------------------------------------------------------------------------
 
 function Invoke-Uninstall {
-    Write-Step "Uninstalling Ollama"
+    Write-Step "Uninstalling Yollama"
 
     $regKey = Find-InnoSetupInstall
     if (-not $regKey) {
-        Write-Host ">>> Ollama is not installed."
+        Write-Host ">>> Yollama is not installed."
         return
     }
 
@@ -235,7 +235,7 @@ function Invoke-Uninstall {
     if (Find-InnoSetupInstall) {
         Write-Warning "Uninstall may not have completed"
     } else {
-        Write-Host ">>> Ollama has been uninstalled."
+        Write-Host ">>> Yollama has been uninstalled."
     }
 }
 
@@ -246,18 +246,18 @@ function Invoke-Uninstall {
 function Invoke-Install {
     # Determine installer URL
     if ($Version) {
-        $installerUrl = "$DownloadBaseURL/OllamaSetup.exe?version=$Version"
+        $installerUrl = "$DownloadBaseURL/YollamaSetup.exe?version=$Version"
     } else {
-        $installerUrl = "$DownloadBaseURL/OllamaSetup.exe"
+        $installerUrl = "$DownloadBaseURL/YollamaSetup.exe"
     }
 
     # Download installer
-    Write-Step "Downloading Ollama"
+    Write-Step "Downloading Yollama"
     if (-not $DebugInstall) {
-        Write-Host ">>> Downloading Ollama for Windows..."
+        Write-Host ">>> Downloading Yollama for Windows..."
     }
 
-    $tempInstaller = Join-Path $env:TEMP "OllamaSetup.exe"
+    $tempInstaller = Join-Path $env:TEMP "YollamaSetup.exe"
     Invoke-Download -Url $installerUrl -OutFile $tempInstaller
 
     # Verify signature
@@ -275,14 +275,14 @@ function Invoke-Install {
     Write-Status "  Installer args: $installerArgs"
 
     # Run installer
-    Write-Step "Installing Ollama"
+    Write-Step "Installing Yollama"
     if (-not $DebugInstall) {
-        Write-Host ">>> Installing Ollama..."
+        Write-Host ">>> Installing Yollama..."
     }
 
     # Create upgrade marker so the app starts hidden
     # The app checks for this file on startup and removes it after
-    $markerDir = Join-Path $env:LOCALAPPDATA "Ollama"
+    $markerDir = Join-Path $env:LOCALAPPDATA "Yollama"
     $markerFile = Join-Path $markerDir "upgraded"
     if (-not (Test-Path $markerDir)) {
         New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
@@ -291,7 +291,7 @@ function Invoke-Install {
     Write-Status "  Created upgrade marker: $markerFile"
 
     # Start installer and wait for just the installer process (not children)
-    # Using -Wait would wait for Ollama to exit too, which we don't want
+    # Using -Wait would wait for Yollama to exit too, which we don't want
     $proc = Start-Process -FilePath $tempInstaller `
         -ArgumentList $installerArgs `
         -PassThru
@@ -305,11 +305,11 @@ function Invoke-Install {
     # Cleanup
     Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
 
-    # Update PATH in current session so 'ollama' works immediately
+    # Update PATH in current session so 'yollama' works immediately
     Write-Step "Updating session PATH"
     Update-SessionPath
 
-    Write-Host ">>> Install complete. Run 'ollama' from the command line."
+    Write-Host ">>> Install complete. Run 'yollama' from the command line."
 }
 
 # --------------------------------------------------------------------------

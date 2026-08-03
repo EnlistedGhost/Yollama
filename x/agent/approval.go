@@ -561,7 +561,7 @@ func formatToolDisplay(toolName string, args map[string]any) string {
 		if query, ok := args["query"].(string); ok {
 			sb.WriteString(fmt.Sprintf("Tool: %s\n", displayName))
 			sb.WriteString(fmt.Sprintf("Query: %s\n", query))
-			sb.WriteString("Uses internet via ollama.com")
+			//sb.WriteString("Uses internet via yollama.com")
 			return sb.String()
 		}
 	}
@@ -571,7 +571,7 @@ func formatToolDisplay(toolName string, args map[string]any) string {
 		if url, ok := args["url"].(string); ok {
 			sb.WriteString(fmt.Sprintf("Tool: %s\n", displayName))
 			sb.WriteString(fmt.Sprintf("URL: %s\n", url))
-			sb.WriteString("Uses internet via ollama.com")
+			//sb.WriteString("Uses internet via yollama.com")
 			return sb.String()
 		}
 	}

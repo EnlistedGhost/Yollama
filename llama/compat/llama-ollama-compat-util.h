@@ -1,10 +1,10 @@
 #pragma once
 
 // Internal helpers shared by the per-architecture handlers in
-// llama-ollama-compat.cpp. Not part of the public API.
+// llama-yollama-compat.cpp. Not part of the public API.
 //
-// Everything lives under namespace llama_ollama_compat::detail. The
-// definitions live in llama-ollama-compat-util.cpp, which also owns the
+// Everything lives under namespace llama_yollama_compat::detail. The
+// definitions live in llama-yollama-compat-util.cpp, which also owns the
 // registry globals (tensor skip list, load-op table) that need a single
 // translation unit.
 //
@@ -46,7 +46,7 @@
 
 struct llama_model_loader;
 
-namespace llama_ollama_compat::detail {
+namespace llama_yollama_compat::detail {
 
 // -- gguf_context KV helpers --
 bool has_key(const gguf_context * meta, const char * key);
@@ -128,11 +128,11 @@ void register_concat_load(const gguf_context * meta, std::string dest_name,
 // Mixed-type variant of register_concat_load: dequantizes each source to
 // F32 via its ggml_type_traits.to_float and concatenates the F32 arrays.
 // Use when sources differ in quantization (e.g. F16 q/k + Q8_0 v in some
-// Ollama vision blobs). Caller must set the destination tensor's type to
+// Yollama vision blobs). Caller must set the destination tensor's type to
 // GGML_TYPE_F32 so dst_size matches the F32 concat size.
 void register_concat_load_to_f32(const gguf_context * meta,
                                  const ggml_context * ctx,
                                  std::string dest_name,
                                  const std::vector<std::string> & src_names);
 
-} // namespace llama_ollama_compat::detail
+} // namespace llama_yollama_compat::detail

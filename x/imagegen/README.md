@@ -1,4 +1,4 @@
-# Image Generation in Ollama (Experimental)
+# Image Generation in Yollama (Experimental)
 
 Generate images from text prompts using local AI models.
 
@@ -6,9 +6,9 @@ Generate images from text prompts using local AI models.
 
 ```bash
 # Run with a prompt
-ollama run z-image "a sunset over mountains"
+yollama run z-image "a sunset over mountains"
 Generating: step 30/30
-Image saved to: /tmp/ollama-image-1704067200.png
+Image saved to: /tmp/yollama-image-1704067200.png
 ```
 
 On macOS, the generated image will automatically open in Preview.
@@ -23,13 +23,13 @@ On macOS, the generated image will automatically open in Preview.
 
 ```bash
 # Generate an image
-ollama run z-image "a cat playing piano"
+yollama run z-image "a cat playing piano"
 
 # Check if model is running
-ollama ps
+yollama ps
 
 # Stop the model
-ollama stop z-image
+yollama stop z-image
 ```
 
 ## API
@@ -125,14 +125,14 @@ data: {"created": 1704067200, "data": [{"b64_json": "..."}]}
 - macOS with Apple Silicon (M1/M2/M3/M4)
 - CUDA: tested on CUDA 12 Blackwell, more testing coming soon
 - Sufficient VRAM (see model table above)
-- Ollama built with MLX support
+- Yollama built with MLX support
 
 ## Limitations
 
 - macOS only (uses MLX backend)
 - Single image per request
 - Fixed step count (30 steps)
-- Modelfiles not yet supported (use `ollama create` from model directory)
+- Modelfiles not yet supported (use `yollama create` from model directory)
 
 ---
 
@@ -142,7 +142,7 @@ Tensor models store each tensor as a separate blob with metadata in the manifest
 
 ## Manifest Structure
 
-The manifest follows the standard ollama format with tensor-specific layer metadata:
+The manifest follows the standard yollama format with tensor-specific layer metadata:
 
 ```json
 {
@@ -151,7 +151,7 @@ The manifest follows the standard ollama format with tensor-specific layer metad
   "config": { "digest": "sha256:...", "size": 1234 },
   "layers": [
     {
-      "mediaType": "application/vnd.ollama.image.tensor",
+      "mediaType": "application/vnd.yollama.image.tensor",
       "digest": "sha256:25b36eed...",
       "size": 49807448,
       "name": "text_encoder/model.layers.0.mlp.down_proj.weight",
@@ -159,7 +159,7 @@ The manifest follows the standard ollama format with tensor-specific layer metad
       "shape": [2560, 9728]
     },
     {
-      "mediaType": "application/vnd.ollama.image.json",
+      "mediaType": "application/vnd.yollama.image.json",
       "digest": "sha256:abc123...",
       "size": 512,
       "name": "text_encoder/config.json"
@@ -210,7 +210,7 @@ The overhead is negligible: 88 bytes per tensor = ~100KB total for a 13GB model 
 Example: Model A and Model B both use the same text encoder. The text encoder's 400 tensors are stored once, referenced by both manifests.
 
 ```
-~/.ollama/models/
+~/.yollama/models/
   blobs/
     sha256-25b36eed...  <- shared by both models
     sha256-abc123...
@@ -223,7 +223,7 @@ Example: Model A and Model B both use the same text encoder. The text encoder's 
 
 ```
 cd ./weights/Z-Image-Turbo
-ollama create z-image
+yollama create z-image
 
 1. Scan component directories (text_encoder/, transformer/, vae/)
 2. For each .safetensors file:
@@ -243,7 +243,7 @@ Z-Image supports FP8 quantization to reduce memory usage by ~50% while maintaini
 
 ```bash
 cd ./weights/Z-Image-Turbo
-ollama create z-image-fp8 --quantize fp8
+yollama create z-image-fp8 --quantize fp8
 ```
 
 This quantizes weights during import. The resulting model will be ~15GB instead of ~31GB.

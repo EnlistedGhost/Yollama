@@ -16,7 +16,7 @@ import (
 	"github.com/ollama/ollama/ml"
 )
 
-// Native GPU discovery runs in a short-lived Ollama subprocess so loading GGML
+// Native GPU discovery runs in a short-lived Yollama subprocess so loading GGML
 // and driver libraries cannot crash the main server process. The subprocess
 // keeps stdout reserved for JSON and lets GGML's default logger write to
 // stderr; the parent captures that stderr for trace/debug diagnostics.
@@ -107,7 +107,7 @@ func discoverNativeDevices(ctx context.Context, llamaServer string, libDirs []st
 
 func RunNativeProbeCommand(ctx context.Context, libDirs []string, out io.Writer) error {
 	if len(libDirs) == 0 {
-		libDirs = []string{ml.LibOllamaPath}
+		libDirs = []string{ml.LibYollamaPath}
 	}
 
 	devices, err := runNativeProbe(ctx, libDirs)

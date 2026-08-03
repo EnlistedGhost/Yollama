@@ -61,8 +61,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Ollama version
-      description: What version of Ollama are you using? (`ollama --version`)
+      label: Yollama version
+      description: What version of Yollama are you using? (`yollama --version`)
       placeholder: e.g., 0.1.32
     validations:
       required: false

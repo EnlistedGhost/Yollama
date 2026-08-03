@@ -78,28 +78,28 @@ func (r *Runner) loadMTPOptions(sample bool) mtpOptions {
 		maxDraftTokens:     defaults.MaxDraftTokens,
 		draftSchedule:      mtpDraftScheduleConstant,
 	}
-	if v := positiveEnvInt("OLLAMA_MLX_MTP_MAX_DRAFT_TOKENS"); v > 0 {
+	if v := positiveEnvInt("YOLLAMA_MLX_MTP_MAX_DRAFT_TOKENS"); v > 0 {
 		opts.maxDraftTokens = v
 	}
-	if v := positiveEnvInt("OLLAMA_MLX_MTP_INITIAL_DRAFT_TOKENS"); v > 0 {
+	if v := positiveEnvInt("YOLLAMA_MLX_MTP_INITIAL_DRAFT_TOKENS"); v > 0 {
 		opts.initialDraftTokens = v
 	}
 	if opts.initialDraftTokens > opts.maxDraftTokens {
 		opts.initialDraftTokens = opts.maxDraftTokens
 	}
-	if b, err := strconv.ParseBool(os.Getenv("OLLAMA_MLX_MTP_SERIAL_VALIDATE")); err == nil {
+	if b, err := strconv.ParseBool(os.Getenv("YOLLAMA_MLX_MTP_SERIAL_VALIDATE")); err == nil {
 		opts.serialValidate = b
 	}
-	if b, err := strconv.ParseBool(os.Getenv("OLLAMA_MLX_MTP_COMPARE_SERIAL_VALIDATE")); err == nil {
+	if b, err := strconv.ParseBool(os.Getenv("YOLLAMA_MLX_MTP_COMPARE_SERIAL_VALIDATE")); err == nil {
 		opts.compareSerialValidate = b
 	}
-	switch schedule := strings.ToLower(strings.TrimSpace(os.Getenv("OLLAMA_MLX_MTP_DRAFT_SCHEDULE"))); schedule {
+	switch schedule := strings.ToLower(strings.TrimSpace(os.Getenv("YOLLAMA_MLX_MTP_DRAFT_SCHEDULE"))); schedule {
 	case "", string(mtpDraftScheduleConstant):
 		opts.draftSchedule = mtpDraftScheduleConstant
 	case string(mtpDraftScheduleHeuristic):
 		opts.draftSchedule = mtpDraftScheduleHeuristic
 	default:
-		slog.Warn("invalid MTP env setting", "key", "OLLAMA_MLX_MTP_DRAFT_SCHEDULE", "value", schedule)
+		slog.Warn("invalid MTP env setting", "key", "YOLLAMA_MLX_MTP_DRAFT_SCHEDULE", "value", schedule)
 	}
 	return opts
 }
@@ -143,10 +143,10 @@ func (r *Runner) useGreedyMTP(opts sampler.Options) bool {
 }
 
 func (r *Runner) useSampleMTP(opts sampler.Options) bool {
-	if serial, err := strconv.ParseBool(os.Getenv("OLLAMA_MLX_MTP_SERIAL_VALIDATE")); err == nil && serial {
+	if serial, err := strconv.ParseBool(os.Getenv("YOLLAMA_MLX_MTP_SERIAL_VALIDATE")); err == nil && serial {
 		return false
 	}
-	if compare, err := strconv.ParseBool(os.Getenv("OLLAMA_MLX_MTP_COMPARE_SERIAL_VALIDATE")); err == nil && compare {
+	if compare, err := strconv.ParseBool(os.Getenv("YOLLAMA_MLX_MTP_COMPARE_SERIAL_VALIDATE")); err == nil && compare {
 		return false
 	}
 	if r.Draft == nil {

@@ -509,7 +509,7 @@ func QuantizeSupported() bool {
 
 // ensureTempDir creates the temp directory for quantization if it doesn't exist
 func ensureTempDir() string {
-	tmpDir := filepath.Join(os.TempDir(), "ollama-quantize")
+	tmpDir := filepath.Join(os.TempDir(), "yollama-quantize")
 	os.MkdirAll(tmpDir, 0o755)
 	return tmpDir
 }

@@ -168,10 +168,10 @@ func (c *DiskCache) Resolve(name string) (Digest, error) {
 
 	// We want to address manifests files by digest using Get. That requires
 	// them to be blobs. This cannot be directly accomplished by looking in
-	// the blob store because manifests can change without Ollama knowing
+	// the blob store because manifests can change without Yollama knowing
 	// (e.g. a user modifies a manifests by hand then pushes it to update
 	// their model). We also need to support the blob caches inherited from
-	// older versions of Ollama, which do not store manifests in the blob
+	// older versions of Yollama, which do not store manifests in the blob
 	// store, so for these cases, we need to handle adding the manifests to
 	// the blob store, just in time.
 	//

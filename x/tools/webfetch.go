@@ -19,14 +19,14 @@ import (
 )
 
 const (
-	webFetchAPI     = "https://ollama.com/api/web_fetch"
+	webFetchAPI     = "http://127.0.0.1/api/web_fetch"
 	webFetchTimeout = 30 * time.Second
 )
 
 // ErrWebFetchAuthRequired is returned when web fetch requires authentication
 var ErrWebFetchAuthRequired = errors.New("web fetch requires authentication")
 
-// WebFetchTool implements web page fetching using Ollama's hosted API.
+// WebFetchTool implements web page fetching using Yollama's hosted API.
 type WebFetchTool struct{}
 
 // Name returns the tool name.
@@ -70,7 +70,7 @@ type webFetchResponse struct {
 }
 
 // Execute fetches content from a web page.
-// Uses Ollama key signing for authentication - this makes requests via ollama.com API.
+// Uses Yollama key signing for authentication - this makes requests via yollama.com API.
 func (w *WebFetchTool) Execute(args map[string]any) (string, error) {
 	if internalcloud.Disabled() {
 		return "", errors.New(internalcloud.DisabledError("web fetch is unavailable"))
@@ -106,7 +106,7 @@ func (w *WebFetchTool) Execute(args map[string]any) (string, error) {
 	q.Add("ts", strconv.FormatInt(time.Now().Unix(), 10))
 	fetchURL.RawQuery = q.Encode()
 
-	// Sign the request using Ollama key (~/.ollama/id_ed25519)
+	// Sign the request using Yollama key (~/.yollama/id_ed25519)
 	ctx := context.Background()
 	data := fmt.Appendf(nil, "%s,%s", http.MethodPost, fetchURL.RequestURI())
 	signature, err := auth.Sign(ctx, data)

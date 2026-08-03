@@ -129,11 +129,7 @@ func (s *Server) CreateHandler(c *gin.Context) {
 
 		if r.From != "" {
 			slog.Debug("create model from model name", "from", r.From)
-			fromRef, err := parseAndValidateModelRef(r.From)
-			if err != nil {
-				ch <- gin.H{"error": errtypes.InvalidModelNameErrMsg, "status": http.StatusBadRequest}
-				return
-			}
+			fromRef := parseAndValidateModelRef(r.From)
 
 			fromName := fromRef.Name
 			remoteHost := r.RemoteHost
@@ -340,8 +336,8 @@ func remoteURL(raw string) (string, error) {
 		raw = "http://" + raw
 	}
 
-	if raw == "ollama.com" || raw == "http://ollama.com" {
-		raw = "https://ollama.com:443"
+	if raw == "127.0.0.1" || raw == "localhost" {
+		raw = "http://127.0.0.1:11434"
 	}
 
 	u, err := url.Parse(raw)
@@ -479,7 +475,7 @@ func detectModelTypeFromFiles(files map[string]string) string {
 }
 
 func convertFromSafetensors(files map[string]string, baseLayers []*layerGGML, isAdapter bool, mediaType string, detectTemplate bool, fn func(resp api.ProgressResponse)) ([]*layerGGML, error) {
-	tmpDir, err := os.MkdirTemp(envconfig.Models(), "ollama-safetensors")
+	tmpDir, err := os.MkdirTemp(envconfig.Models(), "yollama-safetensors")
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +522,7 @@ func convertFromSafetensors(files map[string]string, baseLayers []*layerGGML, is
 
 	if !isAdapter {
 		fn(api.ProgressResponse{Status: "converting model"})
-		mediaType = cmp.Or(mediaType, "application/vnd.ollama.image.model")
+		mediaType = cmp.Or(mediaType, "application/vnd.yollama.image.model")
 		if mediaType == manifest.MediaTypeImageDraft {
 			if err := convertMTPDraftFromSafetensors(os.DirFS(tmpDir), t, baseLayers); err != nil {
 				return nil, err
@@ -542,7 +538,7 @@ func convertFromSafetensors(files map[string]string, baseLayers []*layerGGML, is
 			return nil, err
 		}
 		fn(api.ProgressResponse{Status: "converting adapter"})
-		mediaType = "application/vnd.ollama.image.adapter"
+		mediaType = "application/vnd.yollama.image.adapter"
 		if err := convert.ConvertAdapter(os.DirFS(tmpDir), t, kv); err != nil {
 			return nil, err
 		}
@@ -578,7 +574,7 @@ func convertFromSafetensors(files map[string]string, baseLayers []*layerGGML, is
 			if _, err := projFile.Seek(0, io.SeekStart); err != nil {
 				return nil, err
 			}
-			projLayer, err := manifest.NewLayer(projFile, "application/vnd.ollama.image.projector")
+			projLayer, err := manifest.NewLayer(projFile, "application/vnd.yollama.image.projector")
 			if err != nil {
 				return nil, err
 			}
@@ -672,7 +668,7 @@ func tensorsFromGGUFFile(file *os.File, f *ggml.GGML) []*ggml.Tensor {
 
 func baseModelLayer(layers []*layerGGML) (*layerGGML, error) {
 	for _, layer := range layers {
-		if layer.GGML != nil && layer.MediaType == "application/vnd.ollama.image.model" {
+		if layer.GGML != nil && layer.MediaType == "application/vnd.yollama.image.model" {
 			return layer, nil
 		}
 	}
@@ -701,17 +697,17 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 			}
 
 			quantType := ""
-			if layer.MediaType == "application/vnd.ollama.image.model" {
+			if layer.MediaType == "application/vnd.yollama.image.model" {
 				quantType = strings.ToUpper(cmp.Or(r.Quantize, r.Quantization))
 			} else if layer.MediaType == manifest.MediaTypeImageDraft {
 				quantType = strings.ToUpper(r.DraftQuantize)
 			}
 			ft := layer.GGML.KV().FileType()
 			rewroteLayer := false
-			if quantType == "" && hasSourceFP8Tensors(layer.GGML.KV()) && layer.GGML.Name() == "gguf" && layer.MediaType == "application/vnd.ollama.image.model" && slices.Contains([]string{"F16", "BF16", "F32"}, ft.String()) {
+			if quantType == "" && hasSourceFP8Tensors(layer.GGML.KV()) && layer.GGML.Name() == "gguf" && layer.MediaType == "application/vnd.yollama.image.model" && slices.Contains([]string{"F16", "BF16", "F32"}, ft.String()) {
 				quantType = "Q8_0"
 			}
-			if quantType != "" && layer.GGML.Name() == "gguf" && slices.Contains([]string{"application/vnd.ollama.image.model", manifest.MediaTypeImageDraft}, layer.MediaType) {
+			if quantType != "" && layer.GGML.Name() == "gguf" && slices.Contains([]string{"application/vnd.yollama.image.model", manifest.MediaTypeImageDraft}, layer.MediaType) {
 				want, err := ggml.ParseFileType(quantType)
 				if err != nil {
 					return err
@@ -729,7 +725,7 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 					rewroteLayer = true
 				}
 			}
-			if !rewroteLayer && layer.rewriteForCreate && layer.GGML.Name() == "gguf" && layer.MediaType == "application/vnd.ollama.image.model" && !hasEmbeddedCompatibilityTensors(layer.GGML) {
+			if !rewroteLayer && layer.rewriteForCreate && layer.GGML.Name() == "gguf" && layer.MediaType == "application/vnd.yollama.image.model" && !hasEmbeddedCompatibilityTensors(layer.GGML) {
 				var err error
 				layer, err = copyLayerWithLlamaQuantize(layer, fn)
 				if err != nil {
@@ -743,7 +739,7 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 					return err
 				}
 			}
-			if layer.rewriteForCreate && layer.GGML.Name() == "gguf" && layer.MediaType == "application/vnd.ollama.image.projector" && needsDefaultLlavaProjectorType(layer.GGML) {
+			if layer.rewriteForCreate && layer.GGML.Name() == "gguf" && layer.MediaType == "application/vnd.yollama.image.projector" && needsDefaultLlavaProjectorType(layer.GGML) {
 				var err error
 				fn(api.ProgressResponse{Status: "updating GGUF projector metadata"})
 				layer, err = addDefaultLlavaProjectorType(layer)
@@ -752,7 +748,7 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 				}
 			}
 			switch layer.MediaType {
-			case "application/vnd.ollama.image.model":
+			case "application/vnd.yollama.image.model":
 				config.ModelFormat = cmp.Or(config.ModelFormat, layer.GGML.Name())
 				config.ModelFamily = cmp.Or(config.ModelFamily, layer.GGML.KV().Architecture())
 				config.ModelType = cmp.Or(config.ModelType, format.HumanNumber(layer.GGML.KV().ParameterCount()))
@@ -908,13 +904,13 @@ func quantizeLayer(layer *layerGGML, quantizeType string, fn func(resp api.Progr
 
 func copyLayerWithLlamaQuantize(layer *layerGGML, fn func(resp api.ProgressResponse)) (*layerGGML, error) {
 	// NOTE: For now, we bypass verification of layers and copy of new layers... 
-	// it's horribly slow and serves not purpose if the model is valid GGUF
+	// it's horribly slow and serves no purpose if the model is valid GGUF
 	//
 	//newLayer, err := rewriteLayerWithLlamaQuantize(layer, "COPY", fn, func(in, out *os.File, progressFn func(uint64)) error {
 	//	return copyGGUFWithLlamaQuantize(in, out, layer.GGML, progressFn)
 	//})
 	//if err != nil {
-	//	return nil, fmt.Errorf("Xllama Error 44 - failure engaging llama-quantize compatibility newLayer copy: %w", err)
+	//	return nil, fmt.Errorf("Yollama Error 44 - failure engaging llama-quantize compatibility newLayer copy: %w", err)
 	//}
 	return layer, nil
 }
@@ -1232,12 +1228,12 @@ func ggufLayersWithMediaType(digest, sourceName, mediaType string, fn func(resp 
 	}
 
 	if mediaType == "" {
-		mediaType = "application/vnd.ollama.image.model"
+		mediaType = "application/vnd.yollama.image.model"
 		if f.KV().Kind() == "adapter" {
-			mediaType = "application/vnd.ollama.image.adapter"
+			mediaType = "application/vnd.yollama.image.adapter"
 		} else if (f.KV().Uint("block_count") == 0 && f.KV().Uint("vision.block_count") > 0) || f.KV().Kind() == "projector" {
 			// if a model has vision.block_count but not block_count, it is a standalone vision model
-			mediaType = "application/vnd.ollama.image.projector"
+			mediaType = "application/vnd.yollama.image.projector"
 		}
 	}
 
@@ -1268,13 +1264,13 @@ func removeLayer(layers []manifest.Layer, mediatype string) []manifest.Layer {
 }
 
 func setTemplate(layers []manifest.Layer, t string) ([]manifest.Layer, error) {
-	layers = removeLayer(layers, "application/vnd.ollama.image.template")
+	layers = removeLayer(layers, "application/vnd.yollama.image.template")
 	if _, err := template.Parse(t); err != nil {
 		return nil, fmt.Errorf("%w: %s", errBadTemplate, err)
 	}
 
 	blob := strings.NewReader(t)
-	layer, err := manifest.NewLayer(blob, "application/vnd.ollama.image.template")
+	layer, err := manifest.NewLayer(blob, "application/vnd.yollama.image.template")
 	if err != nil {
 		return nil, err
 	}
@@ -1284,10 +1280,10 @@ func setTemplate(layers []manifest.Layer, t string) ([]manifest.Layer, error) {
 }
 
 func setSystem(layers []manifest.Layer, s string) ([]manifest.Layer, error) {
-	layers = removeLayer(layers, "application/vnd.ollama.image.system")
+	layers = removeLayer(layers, "application/vnd.yollama.image.system")
 	if s != "" {
 		blob := strings.NewReader(s)
-		layer, err := manifest.NewLayer(blob, "application/vnd.ollama.image.system")
+		layer, err := manifest.NewLayer(blob, "application/vnd.yollama.image.system")
 		if err != nil {
 			return nil, err
 		}
@@ -1298,7 +1294,7 @@ func setSystem(layers []manifest.Layer, s string) ([]manifest.Layer, error) {
 
 func setLicense(layers []manifest.Layer, l string) ([]manifest.Layer, error) {
 	blob := strings.NewReader(l)
-	layer, err := manifest.NewLayer(blob, "application/vnd.ollama.image.license")
+	layer, err := manifest.NewLayer(blob, "application/vnd.yollama.image.license")
 	if err != nil {
 		return nil, err
 	}
@@ -1311,7 +1307,7 @@ func setParameters(layers []manifest.Layer, p map[string]any) ([]manifest.Layer,
 		p = make(map[string]any)
 	}
 	for _, layer := range layers {
-		if layer.MediaType != "application/vnd.ollama.image.params" {
+		if layer.MediaType != "application/vnd.yollama.image.params" {
 			continue
 		}
 
@@ -1343,13 +1339,13 @@ func setParameters(layers []manifest.Layer, p map[string]any) ([]manifest.Layer,
 		return layers, nil
 	}
 
-	layers = removeLayer(layers, "application/vnd.ollama.image.params")
+	layers = removeLayer(layers, "application/vnd.yollama.image.params")
 
 	var b bytes.Buffer
 	if err := json.NewEncoder(&b).Encode(p); err != nil {
 		return nil, err
 	}
-	layer, err := manifest.NewLayer(&b, "application/vnd.ollama.image.params")
+	layer, err := manifest.NewLayer(&b, "application/vnd.yollama.image.params")
 	if err != nil {
 		return nil, err
 	}
@@ -1365,12 +1361,12 @@ func setMessages(layers []manifest.Layer, m []api.Message) ([]manifest.Layer, er
 	}
 
 	fmt.Printf("removing old messages\n")
-	layers = removeLayer(layers, "application/vnd.ollama.image.messages")
+	layers = removeLayer(layers, "application/vnd.yollama.image.messages")
 	var b bytes.Buffer
 	if err := json.NewEncoder(&b).Encode(m); err != nil {
 		return nil, err
 	}
-	layer, err := manifest.NewLayer(&b, "application/vnd.ollama.image.messages")
+	layer, err := manifest.NewLayer(&b, "application/vnd.yollama.image.messages")
 	if err != nil {
 		return nil, err
 	}

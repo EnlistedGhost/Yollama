@@ -77,9 +77,9 @@ func Parse(s string) Name {
 //
 // Examples:
 //
-//	http://ollama.com/bmizerany/smol:latest@digest
-//	https://ollama.com/bmizerany/smol:latest
-//	ollama.com/bmizerany/smol:latest@digest // returns "https" scheme.
+//	http://yollama.com/bmizerany/smol:latest@digest
+//	https://yollama.com/bmizerany/smol:latest
+//	yollama.com/bmizerany/smol:latest@digest // returns "https" scheme.
 //	model@digest
 //	@digest
 func Split(s string) (scheme, name, digest string) {

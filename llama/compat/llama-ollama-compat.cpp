@@ -1,5 +1,5 @@
-#include "llama-ollama-compat.h"
-#include "llama-ollama-compat-util.h"
+#include "llama-yollama-compat.h"
+#include "llama-yollama-compat-util.h"
 
 #include "llama-impl.h"
 
@@ -23,25 +23,25 @@
 #include <utility>
 #include <vector>
 
-namespace llama_ollama_compat {
+namespace llama_yollama_compat {
 
-using namespace llama_ollama_compat::detail; // pull detail:: helpers into scope
+using namespace llama_yollama_compat::detail; // pull detail:: helpers into scope
 
 namespace {
 
-#ifdef OLLAMA_COMPAT_MTMD_BUILD
-void ollama_compat_log(const char * format, ...) {
+#ifdef YOLLAMA_COMPAT_MTMD_BUILD
+void yollama_compat_log(const char * format, ...) {
     std::va_list args;
     va_start(args, format);
     std::vfprintf(stderr, format, args);
     va_end(args);
 }
 
-#define OLLAMA_COMPAT_LOG_INFO(...)  do { ollama_compat_log(__VA_ARGS__); } while (0)
-#define OLLAMA_COMPAT_LOG_ERROR(...) ollama_compat_log(__VA_ARGS__)
+#define YOLLAMA_COMPAT_LOG_INFO(...)  do { yollama_compat_log(__VA_ARGS__); } while (0)
+#define YOLLAMA_COMPAT_LOG_ERROR(...) yollama_compat_log(__VA_ARGS__)
 #else
-#define OLLAMA_COMPAT_LOG_INFO(...)  do { LLAMA_LOG_INFO(__VA_ARGS__); } while (0)
-#define OLLAMA_COMPAT_LOG_ERROR(...) LLAMA_LOG_ERROR(__VA_ARGS__)
+#define YOLLAMA_COMPAT_LOG_INFO(...)  do { LLAMA_LOG_INFO(__VA_ARGS__); } while (0)
+#define YOLLAMA_COMPAT_LOG_ERROR(...) LLAMA_LOG_ERROR(__VA_ARGS__)
 #endif
 
 double elapsed_ms(std::chrono::steady_clock::time_point start) {
@@ -66,7 +66,7 @@ TransformTiming record_transform_timing(size_t bytes, double ms) {
 }
 
 bool compat_disabled() {
-    const char * value = std::getenv("OLLAMA_LLAMA_CPP_COMPAT");
+    const char * value = std::getenv("YOLLAMA_LLAMA_CPP_COMPAT");
     return value && std::strcmp(value, "0") == 0;
 }
 
@@ -166,11 +166,11 @@ bool string_kv_missing_or_default(const gguf_context * meta, const char * key) {
 
 constexpr const char * kGemma3ChatTemplate = R"jinja({{ bos_token }}{% if messages[0]['role'] == 'system' %}{{ raise_exception('System role not supported') }}{% endif %}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}{% endif %}{% if (message['role'] == 'assistant') %}{% set role = 'model' %}{% else %}{% set role = message['role'] %}{% endif %}{{ '<start_of_turn>' + role + '\n' + message['content'] | trim + '<end_of_turn>\n' }}{% endfor %}{% if add_generation_prompt %}{{'<start_of_turn>model\n'}}{% endif %})jinja";
 
-// An Ollama-format gemma3 file declares arch="gemma3" AND exhibits at
+// An Yollama-format gemma3 file declares arch="gemma3" AND exhibits at
 // least one converter quirk. Different converter versions produced
 // different quirks (4B/12B/27B have embedded vision + mm KVs; 1B uses
 // non-standard rope key names; all of them omit layer_norm_rms_epsilon).
-bool detect_ollama_gemma3(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_gemma3(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "gemma3") != 0) return false;
@@ -186,9 +186,9 @@ bool detect_ollama_gemma3(const gguf_context * meta, const ggml_context * ctx) {
 }
 
 void handle_gemma3(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_gemma3(meta, ctx)) return;
+    if (!detect_yollama_gemma3(meta, ctx)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format gemma3 GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format gemma3 GGUF; applying compatibility fixes\n", __func__);
 
     // Some published files use nested rope key names. Copy them to the flat
     // names llama.cpp expects before injecting defaults.
@@ -211,7 +211,7 @@ void handle_gemma3(const llama_model_loader * ml, gguf_context * meta, ggml_cont
         inject_f32_if_missing(meta, "gemma3.rope.scaling.factor", 8.0f);
     }
 
-    // Tokenizer vocab size vs embedding rows mismatch: Ollama leaves extra
+    // Tokenizer vocab size vs embedding rows mismatch: Yollama leaves extra
     // multimodal tokens (e.g. <image_soft_token>) in the tokenizer arrays.
     // Truncate to match token_embd rows so llama.cpp's dim check passes.
     for (ggml_tensor * t = ggml_get_first_tensor(ctx); t; t = ggml_get_next_tensor(ctx, t)) {
@@ -224,7 +224,7 @@ void handle_gemma3(const llama_model_loader * ml, gguf_context * meta, ggml_cont
         }
     }
 
-    // Hide embedded vision tensors from the text loader. Ollama's Go side
+    // Hide embedded vision tensors from the text loader. Yollama's Go side
     // re-passes the same blob as --mmproj so the clip loader picks them up.
     add_skip_prefix(ml, "v.");
     add_skip_prefix(ml, "mm.");
@@ -255,7 +255,7 @@ void handle_gemma3(const llama_model_loader * ml, gguf_context * meta, ggml_cont
 // from the (newly-shrunk) tensor shape, so it just reads fewer rows from
 // the same file offset. No load_op needed.
 
-bool detect_ollama_gemma3n(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_gemma3n(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "gemma3n") != 0) return false;
@@ -266,9 +266,9 @@ bool detect_ollama_gemma3n(const gguf_context * meta, const ggml_context * ctx) 
 
 void handle_gemma3n(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
     (void) ml;
-    if (!detect_ollama_gemma3n(meta, ctx)) return;
+    if (!detect_yollama_gemma3n(meta, ctx)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format gemma3n GGUF; normalizing tokenizer and truncating vocab to per_layer_token_embd size\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format gemma3n GGUF; normalizing tokenizer and truncating vocab to per_layer_token_embd size\n", __func__);
 
     ggml_tensor * pe = ggml_get_tensor(ctx, "per_layer_token_embd.weight");
     if (!pe) return;
@@ -346,7 +346,7 @@ void handle_gemma3n(const llama_model_loader * ml, gguf_context * meta, ggml_con
 // prefix to gemma-embedding.*, derive dense_*_feat_* from the actual tensor
 // shapes, and rename dense.0/dense.1 → dense_2/dense_3.
 
-bool detect_ollama_embeddinggemma(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_embeddinggemma(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "gemma3") != 0) return false;
@@ -356,9 +356,9 @@ bool detect_ollama_embeddinggemma(const gguf_context * meta, const ggml_context 
 void handle_embeddinggemma(const llama_model_loader * ml, gguf_context * meta,
                            ggml_context * ctx, std::string & arch_name) {
     (void) ml;
-    if (!detect_ollama_embeddinggemma(meta, ctx)) return;
+    if (!detect_yollama_embeddinggemma(meta, ctx)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format embeddinggemma; translating to gemma-embedding\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format embeddinggemma; translating to gemma-embedding\n", __func__);
 
     // Switch architecture so llama.cpp loads the embedding-specific code path
     // (no causal attention, dense_2/dense_3 loaded by name).
@@ -446,7 +446,7 @@ void handle_snowflake_arctic_embed2(gguf_context * meta) {
     for (size_t i = 0; i < n; ++i) {
         const char * s = gguf_get_arr_str(meta, kid, i);
         if (!s || std::strlen(s) != 1) {
-            OLLAMA_COMPAT_LOG_ERROR("%s: unexpected precompiled charsmap entry length at index %zu\n",
+            YOLLAMA_COMPAT_LOG_ERROR("%s: unexpected precompiled charsmap entry length at index %zu\n",
                                     __func__, i);
             return;
         }
@@ -455,12 +455,12 @@ void handle_snowflake_arctic_embed2(gguf_context * meta) {
 
     std::vector<uint8_t> decoded;
     if (!decode_base64(encoded, decoded) || decoded.empty()) {
-        OLLAMA_COMPAT_LOG_ERROR("%s: failed to decode precompiled charsmap\n", __func__);
+        YOLLAMA_COMPAT_LOG_ERROR("%s: failed to decode precompiled charsmap\n", __func__);
         return;
     }
 
     gguf_set_arr_data(meta, key, GGUF_TYPE_UINT8, decoded.data(), decoded.size());
-    OLLAMA_COMPAT_LOG_INFO("%s: converted tokenizer precompiled charsmap to byte array\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: converted tokenizer precompiled charsmap to byte array\n", __func__);
 }
 
 // =========================================================================
@@ -686,7 +686,7 @@ bool register_qwen35moe_mtp_expert_merge(gguf_context * meta, ggml_context * ctx
     names.reserve(sources.size());
     for (size_t i = 0; i < sources.size(); ++i) {
         if (sources[i].first != static_cast<uint32_t>(i)) {
-            OLLAMA_COMPAT_LOG_ERROR("%s: non-contiguous qwen35moe MTP experts for layer %u suffix %s\n",
+            YOLLAMA_COMPAT_LOG_ERROR("%s: non-contiguous qwen35moe MTP experts for layer %u suffix %s\n",
                                     __func__, mtp_index, src_suffix);
             return false;
         }
@@ -703,7 +703,7 @@ bool register_qwen35moe_mtp_expert_merge(gguf_context * meta, ggml_context * ctx
         ggml_tensor * t = ggml_get_tensor(ctx, name.c_str());
         if (!t || t->type != type || t->ne[0] != ne0 || t->ne[1] != ne1 ||
                 t->ne[2] != 1 || t->ne[3] != 1) {
-            OLLAMA_COMPAT_LOG_ERROR("%s: inconsistent qwen35moe MTP expert tensor shape/type for %s\n",
+            YOLLAMA_COMPAT_LOG_ERROR("%s: inconsistent qwen35moe MTP expert tensor shape/type for %s\n",
                                     __func__, name.c_str());
             return false;
         }
@@ -734,7 +734,7 @@ bool merge_qwen35moe_mtp_expert_tensors(gguf_context * meta, ggml_context * ctx,
         if (gate || up || down) {
             merged_any = true;
             if (!gate || !up || !down) {
-                OLLAMA_COMPAT_LOG_ERROR("%s: incomplete qwen35moe MTP expert merge for layer %u\n", __func__, i);
+                YOLLAMA_COMPAT_LOG_ERROR("%s: incomplete qwen35moe MTP expert merge for layer %u\n", __func__, i);
             }
         }
     }
@@ -776,7 +776,7 @@ bool rename_qwen35_mtp_tensors(gguf_context * meta, ggml_context * ctx,
             gguf_find_tensor(meta, "mtp.shared_head.head.weight") >= 0 ||
             gguf_find_tensor(meta, "mtp.shared_head.norm.weight") >= 0 ||
             gguf_find_tensor(meta, "mtp.norm.weight") >= 0) {
-            OLLAMA_COMPAT_LOG_ERROR("%s: cannot duplicate shared MTP tensors across %u layers\n", __func__, nextn);
+            YOLLAMA_COMPAT_LOG_ERROR("%s: cannot duplicate shared MTP tensors across %u layers\n", __func__, nextn);
         }
         return registered_load_transform;
     }
@@ -804,7 +804,7 @@ bool apply_qwen35_mtp_fixes(gguf_context * meta, ggml_context * ctx, const char 
 
     const uint32_t base_block = qwen35_text_block_count(meta, arch_prefix);
     if (base_block == 0) {
-        OLLAMA_COMPAT_LOG_ERROR("%s: cannot infer qwen3.5 text block count for MTP translation\n", __func__);
+        YOLLAMA_COMPAT_LOG_ERROR("%s: cannot infer qwen3.5 text block count for MTP translation\n", __func__);
         return false;
     }
 
@@ -858,7 +858,7 @@ void apply_qwen35_text_fixes(const llama_model_loader * ml, gguf_context * meta,
     add_skip_prefix(ml, "mtp.");
 }
 
-bool detect_ollama_qwen35moe(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_qwen35moe(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "qwen35moe") != 0) return false;
@@ -877,8 +877,8 @@ bool detect_ollama_qwen35moe(const gguf_context * meta, const ggml_context * ctx
 }
 
 void handle_qwen35moe(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_qwen35moe(meta, ctx)) return;
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format qwen35moe GGUF; applying compatibility fixes\n", __func__);
+    if (!detect_yollama_qwen35moe(meta, ctx)) return;
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format qwen35moe GGUF; applying compatibility fixes\n", __func__);
     apply_qwen35_text_fixes(ml, meta, ctx, "qwen35moe");
 }
 
@@ -889,7 +889,7 @@ void handle_qwen35moe(const llama_model_loader * ml, gguf_context * meta, ggml_c
 // Same layout differences as qwen35moe but the arch name has no "moe" suffix.
 // All the SSM-hybrid / M-RoPE / MTP / monolithic-vision fix-ups apply.
 
-bool detect_ollama_qwen35(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_qwen35(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "qwen35") != 0) return false;
@@ -902,8 +902,8 @@ bool detect_ollama_qwen35(const gguf_context * meta, const ggml_context * ctx) {
 }
 
 void handle_qwen35(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_qwen35(meta, ctx)) return;
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format qwen35 GGUF; applying compatibility fixes\n", __func__);
+    if (!detect_yollama_qwen35(meta, ctx)) return;
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format qwen35 GGUF; applying compatibility fixes\n", __func__);
     apply_qwen35_text_fixes(ml, meta, ctx, "qwen35");
 }
 
@@ -911,7 +911,7 @@ void handle_qwen35(const llama_model_loader * ml, gguf_context * meta, ggml_cont
 // qwen3next (text side)
 // =========================================================================
 
-bool detect_ollama_qwen3next(const gguf_context * meta) {
+bool detect_yollama_qwen3next(const gguf_context * meta) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "qwen3next") != 0) return false;
@@ -920,8 +920,8 @@ bool detect_ollama_qwen3next(const gguf_context * meta) {
 }
 
 void handle_qwen3next(gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_qwen3next(meta)) return;
-    OLLAMA_COMPAT_LOG_INFO("%s: detected qwen3next GGUF with ssm_dt tensors; applying compatibility fixes\n", __func__);
+    if (!detect_yollama_qwen3next(meta)) return;
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected qwen3next GGUF with ssm_dt tensors; applying compatibility fixes\n", __func__);
     collapse_u32_array_to_max(meta, "qwen3next.attention.head_count_kv", 0);
     rename_qwen_ssm_dt_bias_tensors(meta, ctx);
 }
@@ -933,9 +933,9 @@ void handle_qwen3next(gguf_context * meta, ggml_context * ctx) {
 // Same arch name on both sides. Existing published models can use a monolithic
 // GGUF that embeds the vision encoder + audio encoder + projector inline.
 // Split expert gate/up tensors are valid in llama.cpp GGUFs, so they are not
-// sufficient to identify an existing published Ollama model.
+// sufficient to identify an existing published Yollama model.
 
-bool detect_ollama_gemma4(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_gemma4(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "gemma4") != 0) return false;
@@ -1012,9 +1012,9 @@ bool register_gemma4_moe_gate_up_load(gguf_context * meta,
 }
 
 void handle_gemma4(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_gemma4(meta, ctx)) return;
+    if (!detect_yollama_gemma4(meta, ctx)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format gemma4 GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format gemma4 GGUF; applying compatibility fixes\n", __func__);
 
     // Tokenizer fix: published Gemma 4 GGUFs can write
     // `tokenizer.ggml.model = 'llama'` (SPM), but Gemma 4 uses BPE. GGUFs
@@ -1025,7 +1025,7 @@ void handle_gemma4(const llama_model_loader * ml, gguf_context * meta, ggml_cont
     // subword pieces, so when the model emits them they come out as raw
     // text instead of being recognized as control tokens.
     //
-    // Ollama already supplies `tokenizer.ggml.merges` (needed for BPE) and
+    // Yollama already supplies `tokenizer.ggml.merges` (needed for BPE) and
     // `tokenizer.ggml.pre = 'gemma4'`, so flipping the model name is enough.
     {
         const int64_t kid = gguf_find_key(meta, "tokenizer.ggml.model");
@@ -1082,7 +1082,7 @@ void handle_gemma4(const llama_model_loader * ml, gguf_context * meta, ggml_cont
 //   * Skip embedded vision (`v.*`), projector (`mm.*`), and the SAM encoder
 //     (`s.*`) tensors from the text loader.
 
-bool detect_ollama_deepseekocr(const gguf_context * meta) {
+bool detect_yollama_deepseekocr(const gguf_context * meta) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     return std::strcmp(gguf_get_val_str(meta, arch_kid), "deepseekocr") == 0;
@@ -1090,9 +1090,9 @@ bool detect_ollama_deepseekocr(const gguf_context * meta) {
 
 void handle_deepseekocr(const llama_model_loader * ml, gguf_context * meta,
                         ggml_context * ctx, std::string & arch_name) {
-    if (!detect_ollama_deepseekocr(meta)) return;
+    if (!detect_yollama_deepseekocr(meta)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format deepseekocr GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format deepseekocr GGUF; applying compatibility fixes\n", __func__);
 
     gguf_set_val_str(meta, "general.architecture", "deepseek2-ocr");
     rename_kv_prefix(meta, "deepseekocr.", "deepseek2-ocr.");
@@ -1142,7 +1142,7 @@ void handle_deepseekocr(const llama_model_loader * ml, gguf_context * meta,
 // `ffn_latent_up`, and need `moe_latent_size` injected (derived from
 // the latent tensor shape).
 
-bool detect_ollama_nemotron_h_moe(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_nemotron_h_moe(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "nemotron_h_moe") != 0) return false;
@@ -1152,9 +1152,9 @@ bool detect_ollama_nemotron_h_moe(const gguf_context * meta, const ggml_context 
 }
 
 void handle_nemotron_h_moe(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_nemotron_h_moe(meta, ctx)) return;
+    if (!detect_yollama_nemotron_h_moe(meta, ctx)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format nemotron_h_moe GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format nemotron_h_moe GGUF; applying compatibility fixes\n", __func__);
 
     // Inject moe_latent_size for latent-FFN variants (e.g. super 120B-A12B).
     // Standard variants (e.g. cascade-2 30B-A3B) have no latent tensors and
@@ -1191,7 +1191,7 @@ void handle_nemotron_h_moe(const llama_model_loader * ml, gguf_context * meta, g
 // `nemotron_h_moe` text plus a `clip` / `nemotron_v2_vl` projector. Audio is
 // intentionally hidden until llama.cpp can skip or load it safely.
 
-bool detect_ollama_nemotron_h_omni(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_nemotron_h_omni(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "nemotron_h_omni") != 0) return false;
@@ -1235,10 +1235,10 @@ void handle_nemotron_h_omni(const llama_model_loader * ml,
                             gguf_context * meta,
                             ggml_context * ctx,
                             std::string & arch_name) {
-    if (!detect_ollama_nemotron_h_omni(meta, ctx)) return;
+    if (!detect_yollama_nemotron_h_omni(meta, ctx)) return;
 
     const char * text_arch = nemotron_h_omni_text_arch(meta);
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format nemotron_h_omni GGUF; translating text side to %s\n",
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format nemotron_h_omni GGUF; translating text side to %s\n",
                            __func__, text_arch);
 
     gguf_set_val_str(meta, "general.architecture", text_arch);
@@ -1264,7 +1264,7 @@ void handle_nemotron_h_omni(const llama_model_loader * ml,
 // with <|eot_id|>; with that metadata, llama-server can miss the stop token
 // and run until the request timeout.
 
-bool detect_ollama_llama3_metadata_gap(const gguf_context * meta) {
+bool detect_yollama_llama3_metadata_gap(const gguf_context * meta) {
     if (!string_kv_equals(meta, "general.architecture", "llama")) return false;
 
     if (!token_at_equals(meta, 128009, "<|eot_id|>")) return false;
@@ -1283,9 +1283,9 @@ bool detect_ollama_llama3_metadata_gap(const gguf_context * meta) {
 }
 
 void handle_llama3_metadata(gguf_context * meta) {
-    if (!detect_ollama_llama3_metadata_gap(meta)) return;
+    if (!detect_yollama_llama3_metadata_gap(meta)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Llama 3 tokenizer metadata gap; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Llama 3 tokenizer metadata gap; applying compatibility fixes\n", __func__);
 
     if (string_kv_missing_or_default(meta, "tokenizer.ggml.pre")) {
         gguf_set_val_str(meta, "tokenizer.ggml.pre", "llama-bpe");
@@ -1314,7 +1314,7 @@ void handle_llama3_metadata(gguf_context * meta) {
 // names already match llama.cpp; only fix is to hide `v.*`/`mm.*` from
 // the text loader so n_tensors lines up.
 
-bool detect_ollama_llama4(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_llama4(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "llama4") != 0) return false;
@@ -1323,11 +1323,11 @@ bool detect_ollama_llama4(const gguf_context * meta, const ggml_context * ctx) {
 }
 
 void handle_llama4(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_llama4(meta, ctx)) return;
+    if (!detect_yollama_llama4(meta, ctx)) return;
     (void) meta;
     (void) ctx;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format llama4 GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format llama4 GGUF; applying compatibility fixes\n", __func__);
 
     add_skip_prefix(ml, "v.");
     add_skip_prefix(ml, "mm.");
@@ -1369,7 +1369,7 @@ void register_glm4_ffn_concat(gguf_context * meta, ggml_context * ctx, int block
     }
 }
 
-bool detect_ollama_glmocr(const gguf_context * meta) {
+bool detect_yollama_glmocr(const gguf_context * meta) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     return std::strcmp(gguf_get_val_str(meta, arch_kid), "glmocr") == 0;
@@ -1377,9 +1377,9 @@ bool detect_ollama_glmocr(const gguf_context * meta) {
 
 void handle_glmocr(const llama_model_loader * ml, gguf_context * meta,
                    ggml_context * ctx, std::string & arch_name) {
-    if (!detect_ollama_glmocr(meta)) return;
+    if (!detect_yollama_glmocr(meta)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format glmocr GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format glmocr GGUF; applying compatibility fixes\n", __func__);
 
     gguf_set_val_str(meta, "general.architecture", "glm4");
     rename_kv_prefix(meta, "glmocr.", "glm4.");
@@ -1458,7 +1458,7 @@ void handle_glmocr(const llama_model_loader * ml, gguf_context * meta,
 //   * `blk.X.ffn_norm.weight` -> `blk.X.post_attention_norm.weight`
 //     (the second-norm-per-block names differ between converters)
 
-bool detect_ollama_gptoss(const gguf_context * meta) {
+bool detect_yollama_gptoss(const gguf_context * meta) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     return std::strcmp(gguf_get_val_str(meta, arch_kid), "gptoss") == 0;
@@ -1468,10 +1468,10 @@ bool detect_ollama_gptoss(const gguf_context * meta) {
 // LLM_KV lookups query the renamed prefix.
 void handle_gptoss(const llama_model_loader * ml, gguf_context * meta,
                    ggml_context * ctx, std::string & arch_name) {
-    if (!detect_ollama_gptoss(meta)) return;
+    if (!detect_yollama_gptoss(meta)) return;
     (void) ml;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format gpt-oss GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format gpt-oss GGUF; applying compatibility fixes\n", __func__);
 
     gguf_set_val_str(meta, "general.architecture", "gpt-oss");
     rename_kv_prefix(meta, "gptoss.", "gpt-oss.");
@@ -1514,7 +1514,7 @@ void handle_gptoss(const llama_model_loader * ml, gguf_context * meta,
 // while llama.cpp reads `token_embd_norm.weight` (with the LFM2-specific
 // LLM_TENSOR_OUTPUT_NORM_LFM2 mapping). One tensor rename.
 
-bool detect_ollama_lfm2(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_lfm2(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "lfm2") != 0) return false;
@@ -1525,10 +1525,10 @@ bool detect_ollama_lfm2(const gguf_context * meta, const ggml_context * ctx) {
 }
 
 void handle_lfm2(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_lfm2(meta, ctx)) return;
+    if (!detect_yollama_lfm2(meta, ctx)) return;
     (void) ml;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format lfm2 GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format lfm2 GGUF; applying compatibility fixes\n", __func__);
 
     rename_tensor(meta, ctx, "output_norm.weight", "token_embd_norm.weight");
     gguf_set_val_str(meta, "tokenizer.ggml.pre", "lfm2");
@@ -1550,7 +1550,7 @@ void handle_lfm2(const llama_model_loader * ml, gguf_context * meta, ggml_contex
 // =========================================================================
 
 void handle_olmo3(gguf_context * meta, std::string & arch_name) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format olmo3 GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format olmo3 GGUF; applying compatibility fixes\n", __func__);
 
     // llama.cpp does not currently expose an "olmo3" architecture string, but
     // its olmo2 loader covers the same tensor layout and contains the OLMo3
@@ -1578,7 +1578,7 @@ void handle_olmo3(gguf_context * meta, std::string & arch_name) {
 //   * Attention temperature scale: `rope.scaling_beta` maps to
 //     `attention.temperature_scale`. Same numeric value.
 
-bool detect_ollama_mistral3(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_mistral3(const gguf_context * meta, const ggml_context * ctx) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     if (std::strcmp(gguf_get_val_str(meta, arch_kid), "mistral3") != 0) return false;
@@ -1592,10 +1592,10 @@ bool detect_ollama_mistral3(const gguf_context * meta, const ggml_context * ctx)
 }
 
 void handle_mistral3(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
-    if (!detect_ollama_mistral3(meta, ctx)) return;
+    if (!detect_yollama_mistral3(meta, ctx)) return;
     (void) ctx;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format mistral3 GGUF; applying compatibility fixes\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format mistral3 GGUF; applying compatibility fixes\n", __func__);
 
     // RoPE YaRN parameter renames.
     copy_kv(meta, "mistral3.rope.scaling.beta_fast",
@@ -1646,7 +1646,7 @@ void handle_mistral3(const llama_model_loader * ml, gguf_context * meta, ggml_co
 //   * expert_group_count / expert_group_used_count: required by deepseek2
 //                              loader; default to 1 (no group routing).
 
-bool detect_ollama_glm4moelite(const gguf_context * meta) {
+bool detect_yollama_glm4moelite(const gguf_context * meta) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     return std::strcmp(gguf_get_val_str(meta, arch_kid), "glm4moelite") == 0;
@@ -1656,9 +1656,9 @@ void handle_glm4moelite(const llama_model_loader * ml, gguf_context * meta,
                         ggml_context * ctx, std::string & arch_name) {
     (void) ml;
     (void) ctx;
-    if (!detect_ollama_glm4moelite(meta)) return;
+    if (!detect_yollama_glm4moelite(meta)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format glm4moelite GGUF; translating to deepseek2 (MLA conventions)\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format glm4moelite GGUF; translating to deepseek2 (MLA conventions)\n", __func__);
 
     arch_name = "deepseek2";
     gguf_set_val_str(meta, "general.architecture", "deepseek2");
@@ -1718,7 +1718,7 @@ void handle_glm4moelite(const llama_model_loader * ml, gguf_context * meta,
 //   * rope.mrope_section (3 elements) → rope.dimension_sections (4, padded with 0)
 //   * Hide vision+projector tensors from the text loader.
 
-bool detect_ollama_qwen25vl(const gguf_context * meta) {
+bool detect_yollama_qwen25vl(const gguf_context * meta) {
     const int64_t arch_kid = gguf_find_key(meta, "general.architecture");
     if (arch_kid < 0) return false;
     return std::strcmp(gguf_get_val_str(meta, arch_kid), "qwen25vl") == 0;
@@ -1727,9 +1727,9 @@ bool detect_ollama_qwen25vl(const gguf_context * meta) {
 void handle_qwen25vl(const llama_model_loader * ml, gguf_context * meta,
                      ggml_context * ctx, std::string & arch_name) {
     (void) ctx;
-    if (!detect_ollama_qwen25vl(meta)) return;
+    if (!detect_yollama_qwen25vl(meta)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format qwen25vl GGUF; translating to qwen2vl\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format qwen25vl GGUF; translating to qwen2vl\n", __func__);
 
     // Switch architecture so the loader reads qwen2vl.* keys (and uses the
     // qwen2vl model build path, which handles M-RoPE).
@@ -1785,7 +1785,7 @@ std::string qwen3vl_key(const char * arch, const char * suffix) {
     return std::string(arch) + suffix;
 }
 
-bool detect_ollama_qwen3vl(const gguf_context * meta, const ggml_context * ctx) {
+bool detect_yollama_qwen3vl(const gguf_context * meta, const ggml_context * ctx) {
     (void) ctx;
     const char * arch = qwen3vl_arch(meta);
     if (!arch) return false;
@@ -1797,9 +1797,9 @@ bool detect_ollama_qwen3vl(const gguf_context * meta, const ggml_context * ctx) 
 void handle_qwen3vl(const llama_model_loader * ml, gguf_context * meta, ggml_context * ctx) {
     (void) ctx;
     const char * arch = qwen3vl_arch(meta);
-    if (!arch || !detect_ollama_qwen3vl(meta, ctx)) return;
+    if (!arch || !detect_yollama_qwen3vl(meta, ctx)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format %s GGUF; applying compatibility fixes\n", __func__, arch);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format %s GGUF; applying compatibility fixes\n", __func__, arch);
 
     // Inject required M-RoPE sections (current Qwen3-VL family default).
     const int32_t mrope[4] = { 24, 20, 20, 0 };
@@ -1811,7 +1811,7 @@ void handle_qwen3vl(const llama_model_loader * ml, gguf_context * meta, ggml_con
     const uint32_t n_ds = (ds_kid >= 0) ? (uint32_t) gguf_get_arr_n(meta, ds_kid) : 0;
     inject_u32_if_missing(meta, qwen3vl_key(arch, ".n_deepstack_layers").c_str(), n_ds);
 
-    // Hide embedded vision tensors from the text loader. Ollama's Go side
+    // Hide embedded vision tensors from the text loader. Yollama's Go side
     // re-passes the same blob as --mmproj so the clip loader picks them up.
     add_skip_prefix(ml, "v.");
     add_skip_prefix(ml, "mm.");
@@ -1928,7 +1928,7 @@ void register_qwen35moe_patch_embed_split(gguf_context * meta, ggml_context * ct
     const ggml_tensor * src_t = ggml_get_tensor(ctx, src_name);
     if (!src_t) return;
     if (src_t->type != GGML_TYPE_F16) {
-        OLLAMA_COMPAT_LOG_ERROR("%s: unsupported %s type %d; expected F16\n", __func__, src_name, src_t->type);
+        YOLLAMA_COMPAT_LOG_ERROR("%s: unsupported %s type %d; expected F16\n", __func__, src_name, src_t->type);
         return;
     }
 
@@ -1939,7 +1939,7 @@ void register_qwen35moe_patch_embed_split(gguf_context * meta, ggml_context * ct
     const int64_t frames  = src_t->ne[2];
     const int64_t packed  = src_t->ne[3];
     if (cin <= 0 || width <= 0 || height <= 0 || frames != 2 || packed % cin != 0) {
-        OLLAMA_COMPAT_LOG_ERROR("%s: unsupported %s shape [%lld %lld %lld %lld] with channels %lld\n",
+        YOLLAMA_COMPAT_LOG_ERROR("%s: unsupported %s shape [%lld %lld %lld %lld] with channels %lld\n",
                                 __func__, src_name,
                                 (long long) width, (long long) height, (long long) frames,
                                 (long long) packed, (long long) cin);
@@ -1998,7 +1998,7 @@ void register_qwen3vl_patch_embed_split(gguf_context * meta, ggml_context * ctx,
     const ggml_tensor * src_t = ggml_get_tensor(ctx, src_name);
     if (!src_t) return;
     if (src_t->type != GGML_TYPE_F16) {
-        OLLAMA_COMPAT_LOG_ERROR("%s: unsupported %s type %d; expected F16\n", __func__, src_name, src_t->type);
+        YOLLAMA_COMPAT_LOG_ERROR("%s: unsupported %s type %d; expected F16\n", __func__, src_name, src_t->type);
         return;
     }
 
@@ -2009,7 +2009,7 @@ void register_qwen3vl_patch_embed_split(gguf_context * meta, ggml_context * ctx,
     const int64_t frames  = src_t->ne[2];
     const int64_t packed  = src_t->ne[3];
     if (cin <= 0 || width <= 0 || height <= 0 || frames != 2 || packed % cin != 0) {
-        OLLAMA_COMPAT_LOG_ERROR("%s: unsupported %s shape [%lld %lld %lld %lld] with channels %lld\n",
+        YOLLAMA_COMPAT_LOG_ERROR("%s: unsupported %s shape [%lld %lld %lld %lld] with channels %lld\n",
                                 __func__, src_name,
                                 (long long) width, (long long) height, (long long) frames,
                                 (long long) packed, (long long) cin);
@@ -2059,7 +2059,7 @@ void register_qwen3vl_patch_embed_split(gguf_context * meta, ggml_context * ctx,
 }
 
 void handle_qwen35_like_clip(gguf_context * meta, ggml_context * ctx, const char * arch) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format %s GGUF used as mmproj; translating\n", __func__, arch);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format %s GGUF used as mmproj; translating\n", __func__, arch);
 
     auto kv = [arch](const char * suffix) {
         return std::string(arch) + suffix;
@@ -2134,7 +2134,7 @@ void handle_qwen35_clip(gguf_context * meta, ggml_context * ctx) {
 //   * MLP projector under `mm.*`
 // The PROJECTOR_TYPE_DEEPSEEKOCR loader expects:
 //   * SAM under `v.sam.*`
-//   * CLIP under `v.*` (different leaf names than Ollama)
+//   * CLIP under `v.*` (different leaf names than Yollama)
 //   * Projector as `mm.model.fc.*` plus `v.image_newline` / `v.view_seperator`
 
 constexpr std::pair<const char *, const char *> kDeepseekocrClipRenames[] = {
@@ -2161,7 +2161,7 @@ constexpr std::pair<const char *, const char *> kDeepseekocrClipRenames[] = {
 };
 
 void handle_deepseekocr_clip(gguf_context * meta, ggml_context * ctx) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format deepseekocr GGUF used as mmproj; translating\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format deepseekocr GGUF used as mmproj; translating\n", __func__);
 
     // CLIP encoder hparams.
     copy_u32_kv(meta, "deepseekocr.vision.block_count",      "clip.vision.block_count");
@@ -2430,7 +2430,7 @@ void register_nemotron3_patch_embedding(gguf_context * meta,
 }
 
 void handle_nemotron_h_omni_clip(gguf_context * meta, ggml_context * ctx) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format nemotron_h_omni GGUF used as mmproj; translating\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format nemotron_h_omni GGUF used as mmproj; translating\n", __func__);
 
     gguf_set_val_str(meta, "general.architecture", "clip");
 
@@ -2516,7 +2516,7 @@ void handle_nemotron_h_omni_clip(gguf_context * meta, ggml_context * ctx) {
 // most other arches.
 
 void handle_gemma4_clip(gguf_context * meta, ggml_context * ctx) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format gemma4 GGUF used as mmproj; translating\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format gemma4 GGUF used as mmproj; translating\n", __func__);
 
     gguf_set_val_str(meta, "general.architecture", "clip");
 
@@ -2574,7 +2574,7 @@ void handle_gemma4_clip(gguf_context * meta, ggml_context * ctx) {
         // have ln1/ln2). Order matters: ln2 → attn_post_norm must run before
         // layer_pre_norm → ln2 (otherwise the second rename collides).
         //
-        // Semantic mapping (from Ollama's model_audio.go and gemma4a.cpp):
+        // Semantic mapping (from Yollama's model_audio.go and gemma4a.cpp):
         //   ln1            → attn_pre_norm    (pre-attention norm)
         //   ln2            → attn_post_norm   (post-attention norm; NOT block out)
         //   layer_pre_norm → ln2              (final block output norm)
@@ -2611,7 +2611,7 @@ void handle_gemma4_clip(gguf_context * meta, ggml_context * ctx) {
 //   * F32 promote of patch_embd weights (Metal IM2COL).
 
 void handle_glmocr_clip(gguf_context * meta, ggml_context * ctx) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format glm-ocr GGUF used as mmproj; translating\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format glm-ocr GGUF used as mmproj; translating\n", __func__);
 
     copy_u32_kv(meta, "glmocr.vision.block_count",                   "clip.vision.block_count");
     copy_u32_kv(meta, "glmocr.vision.embedding_length",              "clip.vision.embedding_length");
@@ -2691,7 +2691,7 @@ constexpr std::pair<const char *, const char *> kLlama4ClipRenames[] = {
 };
 
 void handle_llama4_clip(gguf_context * meta, ggml_context * ctx) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format llama4 GGUF used as mmproj; translating\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format llama4 GGUF used as mmproj; translating\n", __func__);
 
     copy_u32_kv(meta, "llama4.vision.block_count",                    "clip.vision.block_count");
     copy_u32_kv(meta, "llama4.vision.embedding_length",               "clip.vision.embedding_length");
@@ -2827,7 +2827,7 @@ void register_mistral3_vision_qk_permute(gguf_context * meta, ggml_context * ctx
 }
 
 void handle_mistral3_clip(gguf_context * meta, ggml_context * ctx) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format mistral3 GGUF used as mmproj; translating\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format mistral3 GGUF used as mmproj; translating\n", __func__);
 
     copy_u32_kv(meta, "mistral3.vision.block_count",            "clip.vision.block_count");
     copy_u32_kv(meta, "mistral3.vision.embedding_length",       "clip.vision.embedding_length");
@@ -2919,7 +2919,7 @@ void handle_mistral3_clip(gguf_context * meta, ggml_context * ctx) {
 // projection_dim (= text embedding_length, qwen25vl.embedding_length).
 
 void handle_qwen25vl_clip(gguf_context * meta, ggml_context * ctx) {
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format qwen25vl GGUF used as mmproj; translating\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format qwen25vl GGUF used as mmproj; translating\n", __func__);
 
     copy_u32_kv(meta, "qwen25vl.vision.attention.head_count",          "clip.vision.attention.head_count");
     copy_f32_kv(meta, "qwen25vl.vision.attention.layer_norm_epsilon",  "clip.vision.attention.layer_norm_epsilon");
@@ -3003,7 +3003,7 @@ void handle_qwen3vl_clip(gguf_context * meta, ggml_context * ctx) {
     if (!arch_cstr) return;
     const std::string arch(arch_cstr);
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format %s GGUF used as mmproj; translating\n", __func__, arch.c_str());
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format %s GGUF used as mmproj; translating\n", __func__, arch.c_str());
 
     copy_u32_kv(meta, qwen3vl_key(arch.c_str(), ".vision.attention.head_count").c_str(),         "clip.vision.attention.head_count");
     copy_f32_kv(meta, qwen3vl_key(arch.c_str(), ".vision.attention.layer_norm_epsilon").c_str(), "clip.vision.attention.layer_norm_epsilon");
@@ -3176,7 +3176,7 @@ bool needs_default_llava_projector_type(const gguf_context * meta) {
 void handle_missing_llava_projector_type(gguf_context * meta) {
     if (!needs_default_llava_projector_type(meta)) return;
 
-    OLLAMA_COMPAT_LOG_INFO("%s: detected LLaVA/BakLLaVA projector without projector type; defaulting to mlp\n", __func__);
+    YOLLAMA_COMPAT_LOG_INFO("%s: detected LLaVA/BakLLaVA projector without projector type; defaulting to mlp\n", __func__);
     gguf_set_val_str(meta, "clip.projector_type", "mlp");
 }
 
@@ -3229,7 +3229,7 @@ bool translate_metadata(const llama_model_loader * ml,
 
     const bool no_mmap = is_mmap_disabled_for(ml);
     if (no_mmap) {
-        OLLAMA_COMPAT_LOG_INFO("compat patch disabled mmap for transformed text tensors\n");
+        YOLLAMA_COMPAT_LOG_INFO("compat patch disabled mmap for transformed text tensors\n");
     }
     return no_mmap;
 }
@@ -3242,48 +3242,48 @@ void translate_clip_metadata(gguf_context * meta, ggml_context * ctx) {
 
     if (!any_tensor_with_prefix(ctx, "v.")) return; // nothing to translate
 
-    if (detect_ollama_gemma3(meta, ctx)) {
-        OLLAMA_COMPAT_LOG_INFO("%s: detected Ollama-format gemma3 GGUF used as mmproj; translating\n", __func__);
+    if (detect_yollama_gemma3(meta, ctx)) {
+        YOLLAMA_COMPAT_LOG_INFO("%s: detected Yollama-format gemma3 GGUF used as mmproj; translating\n", __func__);
         handle_gemma3_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_qwen35moe(meta, ctx)) {
+    if (detect_yollama_qwen35moe(meta, ctx)) {
         handle_qwen35moe_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_qwen35(meta, ctx)) {
+    if (detect_yollama_qwen35(meta, ctx)) {
         handle_qwen35_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_mistral3(meta, ctx)) {
+    if (detect_yollama_mistral3(meta, ctx)) {
         handle_mistral3_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_deepseekocr(meta)) {
+    if (detect_yollama_deepseekocr(meta)) {
         handle_deepseekocr_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_nemotron_h_omni(meta, ctx)) {
+    if (detect_yollama_nemotron_h_omni(meta, ctx)) {
         handle_nemotron_h_omni_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_llama4(meta, ctx)) {
+    if (detect_yollama_llama4(meta, ctx)) {
         handle_llama4_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_gemma4(meta, ctx)) {
+    if (detect_yollama_gemma4(meta, ctx)) {
         handle_gemma4_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_glmocr(meta)) {
+    if (detect_yollama_glmocr(meta)) {
         handle_glmocr_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_qwen25vl(meta)) {
+    if (detect_yollama_qwen25vl(meta)) {
         handle_qwen25vl_clip(meta, ctx);
         return;
     }
-    if (detect_ollama_qwen3vl(meta, ctx)) {
+    if (detect_yollama_qwen3vl(meta, ctx)) {
         handle_qwen3vl_clip(meta, ctx);
         return;
     }
@@ -3304,7 +3304,7 @@ static bool write_tensor_data(ggml_tensor * cur,
     const bool is_host = !buft || ggml_backend_buft_is_host(buft);
     if (is_host) {
         if (!cur->data) {
-            OLLAMA_COMPAT_LOG_ERROR("%s: no destination for %s (no buffer, no data)\n", __func__, ggml_get_name(cur));
+            YOLLAMA_COMPAT_LOG_ERROR("%s: no destination for %s (no buffer, no data)\n", __func__, ggml_get_name(cur));
             return false;
         }
         std::memcpy(cur->data, data, size);
@@ -3323,7 +3323,7 @@ static bool load_tensor_with_op(ggml_tensor * cur,
     const size_t dst_size = ggml_nbytes(cur);
     std::vector<uint8_t> dst(dst_size);
     if (!op.apply(source_file, dst.data(), dst_size)) {
-        OLLAMA_COMPAT_LOG_ERROR("%s: %s failed for %s after %.3f ms\n",
+        YOLLAMA_COMPAT_LOG_ERROR("%s: %s failed for %s after %.3f ms\n",
                                 __func__, op.description, ggml_get_name(cur), elapsed_ms(start));
         return false;
     }
@@ -3332,7 +3332,7 @@ static bool load_tensor_with_op(ggml_tensor * cur,
 
     const double ms = elapsed_ms(start);
     const TransformTiming total = record_transform_timing(dst_size, ms);
-    OLLAMA_COMPAT_LOG_INFO("compat tensor transform: op=%s tensor=%s bytes=%zu duration_ms=%.3f total_ops=%llu total_bytes=%zu total_ms=%.3f\n",
+    YOLLAMA_COMPAT_LOG_INFO("compat tensor transform: op=%s tensor=%s bytes=%zu duration_ms=%.3f total_ops=%llu total_bytes=%zu total_ms=%.3f\n",
                            op.description, ggml_get_name(cur), dst_size, ms,
                            (unsigned long long) total.count, total.bytes, total.ms);
     return true;
@@ -3354,7 +3354,7 @@ bool maybe_load_tensor(ggml_tensor * cur,
     const size_t dst_size = ggml_nbytes(cur);
     std::vector<uint8_t> dst(dst_size);
     if (!read_at(source_file, file_offset, dst.data(), dst_size)) {
-        OLLAMA_COMPAT_LOG_ERROR("%s: read failed for %s\n", __func__, ggml_get_name(cur));
+        YOLLAMA_COMPAT_LOG_ERROR("%s: read failed for %s\n", __func__, ggml_get_name(cur));
         return false;
     }
     return write_tensor_data(cur, buft, dst.data(), dst_size);
@@ -3387,4 +3387,4 @@ bool maybe_load_text_tensor(const llama_model_loader * ml,
     return load_tensor_with_op(cur, path.c_str(), buft, op);
 }
 
-} // namespace llama_ollama_compat
+} // namespace llama_yollama_compat

@@ -105,7 +105,7 @@ const (
 	DefaultDownloadConcurrency = 64
 	DefaultUploadConcurrency   = 64
 	maxRetries                 = 6
-	defaultUserAgent           = "ollama-transfer/1.0"
+	defaultUserAgent           = "yollama-transfer/1.0"
 
 	// resumeThreshold is the minimum blob size for resume support.
 	// Only blobs above this size keep partial .tmp files on failure.

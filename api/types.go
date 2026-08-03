@@ -28,29 +28,14 @@ type StatusError struct {
 
 func (e StatusError) Error() string {
 	switch {
-	case e.Status != "" && e.ErrorMessage != "":
-		return fmt.Sprintf("%s: %s", e.Status, e.ErrorMessage)
 	case e.Status != "":
 		return e.Status
 	case e.ErrorMessage != "":
 		return e.ErrorMessage
 	default:
 		// this should not happen
-		return "something went wrong, please see the ollama server logs for details"
+		return "something went wrong, please see the yollama server logs for details"
 	}
-}
-
-type AuthorizationError struct {
-	StatusCode int
-	Status     string
-	SigninURL  string `json:"signin_url"`
-}
-
-func (e AuthorizationError) Error() string {
-	if e.Status != "" {
-		return e.Status
-	}
-	return "something went wrong, please see the ollama server logs for details"
 }
 
 // ImageData represents the raw binary data of an image file.
@@ -60,8 +45,8 @@ type ImageData []byte
 // have to specify the Model and Prompt fields, all the other fields have
 // reasonable defaults for basic uses.
 type GenerateRequest struct {
-	// Model is the model name; it should be a name familiar to Ollama from
-	// the library at https://ollama.com/library
+	// Model is the model name; it should be a name familiar to Yollama from
+	// the library at https://yollama.com/library
 	Model string `json:"model"`
 
 	// Prompt is the textual prompt to send to the model.
@@ -538,7 +523,7 @@ type ChatResponse struct {
 	// RemoteModel is the name of the upstream model that generated the response.
 	RemoteModel string `json:"remote_model,omitempty"`
 
-	// RemoteHost is the URL of the upstream Ollama host that generated the response.
+	// RemoteHost is the URL of the upstream Yollama host that generated the response.
 	RemoteHost string `json:"remote_host,omitempty"`
 
 	// CreatedAt is the timestamp of the response.
@@ -679,7 +664,7 @@ type CreateRequest struct {
 	// From is the name of the model or file to use as the source.
 	From string `json:"from,omitempty"`
 
-	// RemoteHost is the URL of the upstream ollama API for the model (if any).
+	// RemoteHost is the URL of the upstream yollama API for the model (if any).
 	RemoteHost string `json:"remote_host,omitempty"`
 
 	// Files is a map of files include when creating the model.
@@ -709,7 +694,7 @@ type CreateRequest struct {
 	Renderer string `json:"renderer,omitempty"`
 	Parser   string `json:"parser,omitempty"`
 
-	// Requires is the minimum version of Ollama required by the model.
+	// Requires is the minimum version of Yollama required by the model.
 	Requires string `json:"requires,omitempty"`
 
 	// Info is a map of additional information for the model
@@ -849,7 +834,7 @@ type GenerateResponse struct {
 	// RemoteModel is the name of the upstream model that generated the response.
 	RemoteModel string `json:"remote_model,omitempty"`
 
-	// RemoteHost is the URL of the upstream Ollama host that generated the response.
+	// RemoteHost is the URL of the upstream Yollama host that generated the response.
 	RemoteHost string `json:"remote_host,omitempty"`
 
 	// CreatedAt is the timestamp of the response.
@@ -1082,7 +1067,7 @@ func DefaultOptions() Options {
 		Runner: Runner{
 			// options set when the model is loaded
 			NumCtx:          int(envconfig.ContextLength()),
-			NumBatch:        1024,
+			NumBatch:        1512,
 			NumGPU:          -1, // -1 here indicates that NumGPU should be set dynamically
 			NumThread:       0,  // let the runtime decide
 			DraftNumPredict: 0,

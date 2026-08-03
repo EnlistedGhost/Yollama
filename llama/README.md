@@ -2,16 +2,16 @@
 
 ## Updating llama.cpp
 
-`LLAMA_CPP_VERSION` pins Ollama's llama.cpp source. An update can change more
+`LLAMA_CPP_VERSION` pins Yollama's llama.cpp source. An update can change more
 than compilation: it can affect model loading, GPU discovery, scheduler inputs,
 runtime logs, streaming, and compatibility patches. Validate the upstream diff,
-the patched source Ollama actually builds, and the affected local paths.
+the patched source Yollama actually builds, and the affected local paths.
 
 ### Workflow
 
 Record the old ref from the base branch and choose an explicit new llama.cpp
 tag or commit. After updating `LLAMA_CPP_VERSION`, materialize the source
-through Ollama's normal build path:
+through Yollama's normal build path:
 
 ```sh
 cmake -S llama/server --preset cpu
@@ -52,7 +52,7 @@ For build prerequisites, platform notes, and backend selection, see the
   `--main-gpu`, split-mode behavior, and scheduler-sensitive flags consumed by
   `llm/llama_server.go` or `server/sched.go`.
 - Streaming: any new SSE frame shape, heartbeat, keepalive ping, completion
-  marker, or response cadence on paths Ollama parses directly.
+  marker, or response cadence on paths Yollama parses directly.
 - Model and conversion surfaces: new architectures, tensor names, GGUF
   metadata, tokenizer behavior, speculative/MTP paths, sampler defaults, and
   server capabilities that may require updates under `convert/`, `model/`,
@@ -83,7 +83,7 @@ Run the Go tests:
 ```sh
 go test ./...
 ```
-Then proceed to build the full Ollama release and verify.
+Then proceed to build the full Yollama release and verify.
 
 ### End-to-end Testing
 
@@ -92,7 +92,7 @@ platform using the [developer guide](../docs/development.md): Metal on macOS
 arm64, and the available CUDA, ROCm, and Vulkan backends on Linux and Windows.
 
 Then run the [integration tests](../integration/README.md) on the platforms
-being validated. Use them to exercise real Ollama requests and inspect logs for
+being validated. Use them to exercise real Yollama requests and inspect logs for
 device discovery, offload, memory accounting, flash attention, and
 request/response behavior. macOS, Windows, and Linux behavior must be validated
 on those platforms.

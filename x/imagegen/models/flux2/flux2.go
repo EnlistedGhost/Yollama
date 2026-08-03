@@ -46,7 +46,7 @@ type Model struct {
 // Go's ForwardWithLayerOutputs captures after layer i runs, so we use [8, 17, 26].
 var TextEncoderLayerIndices = []int{8, 17, 26}
 
-// Load loads the FLUX.2 Klein model from ollama blob storage.
+// Load loads the FLUX.2 Klein model from yollama blob storage.
 func (m *Model) Load(modelName string) error {
 	fmt.Printf("Loading FLUX.2 Klein model from manifest: %s...\n", modelName)
 	start := time.Now()

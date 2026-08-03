@@ -27,8 +27,8 @@ import (
 	"github.com/ollama/ollama/x/safetensors"
 )
 
-// MinOllamaVersion is the minimum Ollama version required for safetensors models.
-const MinOllamaVersion = "0.19.0"
+// MinYollamaVersion is the minimum Yollama version required for safetensors models.
+const MinYollamaVersion = "0.19.0"
 
 // ModelfileConfig holds configuration extracted from a Modelfile.
 type ModelfileConfig struct {
@@ -517,7 +517,7 @@ func newManifestWriter(opts CreateOptions, capabilities []string, parserName, re
 			configData.FileType = strings.ToLower(strings.TrimSpace(opts.Quantize))
 		}
 		configData.Capabilities = caps
-		configData.Requires = MinOllamaVersion
+		configData.Requires = MinYollamaVersion
 		configData.Parser = resolveParserName(opts.Modelfile, parserName)
 		configData.Renderer = resolveRendererName(opts.Modelfile, rendererName)
 		if opts.Modelfile != nil && opts.Modelfile.Draft != "" {
@@ -583,7 +583,7 @@ func createModelfileLayers(mf *ModelfileConfig) ([]manifest.Layer, error) {
 	var layers []manifest.Layer
 
 	if mf.Template != "" {
-		layer, err := manifest.NewLayer(bytes.NewReader([]byte(mf.Template)), "application/vnd.ollama.image.template")
+		layer, err := manifest.NewLayer(bytes.NewReader([]byte(mf.Template)), "application/vnd.yollama.image.template")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create template layer: %w", err)
 		}
@@ -591,7 +591,7 @@ func createModelfileLayers(mf *ModelfileConfig) ([]manifest.Layer, error) {
 	}
 
 	if mf.System != "" {
-		layer, err := manifest.NewLayer(bytes.NewReader([]byte(mf.System)), "application/vnd.ollama.image.system")
+		layer, err := manifest.NewLayer(bytes.NewReader([]byte(mf.System)), "application/vnd.yollama.image.system")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create system layer: %w", err)
 		}
@@ -599,7 +599,7 @@ func createModelfileLayers(mf *ModelfileConfig) ([]manifest.Layer, error) {
 	}
 
 	if mf.License != "" {
-		layer, err := manifest.NewLayer(bytes.NewReader([]byte(mf.License)), "application/vnd.ollama.image.license")
+		layer, err := manifest.NewLayer(bytes.NewReader([]byte(mf.License)), "application/vnd.yollama.image.license")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create license layer: %w", err)
 		}
@@ -612,7 +612,7 @@ func createModelfileLayers(mf *ModelfileConfig) ([]manifest.Layer, error) {
 			return nil, fmt.Errorf("failed to encode parameters: %w", err)
 		}
 
-		layer, err := manifest.NewLayer(&b, "application/vnd.ollama.image.params")
+		layer, err := manifest.NewLayer(&b, "application/vnd.yollama.image.params")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create params layer: %w", err)
 		}

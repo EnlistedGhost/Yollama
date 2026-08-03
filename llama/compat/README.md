@@ -1,7 +1,7 @@
 # llama.cpp compatibility layer
 
 This directory holds a temporary in-process compatibility layer for existing
-published Ollama GGUFs whose metadata or tensor layout does not yet match what
+published Yollama GGUFs whose metadata or tensor layout does not yet match what
 llama.cpp expects directly. The layer translates those files in memory at load
 time so users do not need to re-pull or re-create models during the transition
 to llama-server.
@@ -13,14 +13,14 @@ tensor layouts on disk, and this directory can be removed.
 The layer is applied automatically at build time via CMake `FetchContent`'s
 `PATCH_COMMAND` for normal fetched builds. If CMake is pointed at a source
 override through `FETCHCONTENT_SOURCE_DIR_LLAMA_CPP`, the same patch is applied
-during configure. If `OLLAMA_LLAMA_CPP_SOURCE` is set, the patch is
+during configure. If `YOLLAMA_LLAMA_CPP_SOURCE` is set, the patch is
 intentionally skipped so a developer can iterate on a local llama.cpp tree.
 
 ## Files
 
-- `llama-ollama-compat.h`, `llama-ollama-compat.cpp` - the compatibility
+- `llama-yollama-compat.h`, `llama-yollama-compat.cpp` - the compatibility
   entry points and per-architecture handlers.
-- `llama-ollama-compat-util.h`, `llama-ollama-compat-util.cpp` - helpers for
+- `llama-yollama-compat-util.h`, `llama-yollama-compat-util.cpp` - helpers for
   KV edits, tensor renames, skip-prefix tracking, tensor load operations, and
   small tensor repacking primitives.
 - `llama-cpp-hooks.patch` - small additive call-site edits in llama.cpp files.
@@ -53,14 +53,14 @@ The layer runs at a small set of loader hook points:
    split, or zero-fill.
 
 Files that do not match a supported published-model marker are left unchanged.
-Setting `OLLAMA_LLAMA_CPP_COMPAT=0` disables the hook bodies for internal
+Setting `YOLLAMA_LLAMA_CPP_COMPAT=0` disables the hook bodies for internal
 create-time validation and for models that are already known to be
 llama.cpp-compatible on disk.
 
 ## Supported Transformations
 
 This table tracks the dispatch surface. Keep it brief; the handler comments in
-`llama-ollama-compat.cpp` are the source of truth for exact KV and tensor maps.
+`llama-yollama-compat.cpp` are the source of truth for exact KV and tensor maps.
 
 | Internal arch / marker | Text handling | Clip/mmproj handling |
 |---|---|---|
@@ -89,17 +89,17 @@ This table tracks the dispatch surface. Keep it brief; the handler comments in
 Usage:
 
 ```sh
-llama-server --model /path/to/ollama-blob --mmproj /path/to/ollama-blob
+llama-server --model /path/to/yollama-blob --mmproj /path/to/yollama-blob
 ```
 
 Passing the same monolithic GGUF as both `--model` and `--mmproj` works because
 each loader applies its own translation.
 
 Additional architectures are added by implementing a `handle_<arch>()` and,
-for vision models, `handle_<arch>_clip()` in `llama-ollama-compat.cpp`, then
+for vision models, `handle_<arch>_clip()` in `llama-yollama-compat.cpp`, then
 dispatching them from `translate_metadata` / `translate_clip_metadata`. For
 monolithic vision models, also update the `compatClipArches` allowlist in
-`llm/llama_server.go` so Ollama passes the main GGUF as `--mmproj`.
+`llm/llama_server.go` so Yollama passes the main GGUF as `--mmproj`.
 
 ## Regenerating the Patch File
 
@@ -111,7 +111,7 @@ cd /path/to/llama.cpp
 git diff -- \
     src/llama-model-loader.cpp \
     tools/mtmd/clip.cpp \
-    > /path/to/ollama/llama/compat/llama-cpp-hooks.patch
+    > /path/to/yollama/llama/compat/llama-cpp-hooks.patch
 ```
 
 ## Implementation Notes

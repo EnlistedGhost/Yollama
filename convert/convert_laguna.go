@@ -279,7 +279,7 @@ func (p *lagunaModel) KV(t *Tokenizer) KV {
 	// special token explicitly. Auto-prepending BOS here would duplicate it.
 	kv["tokenizer.ggml.add_bos_token"] = false
 	kv["tokenizer.ggml.pre"] = "laguna"
-	// Laguna does not need tokenizer.chat_template at runtime: Ollama create
+	// Laguna does not need tokenizer.chat_template at runtime: Yollama create
 	// sets the Laguna renderer/parser from the architecture, and the renderer
 	// owns prompt formatting.
 	delete(kv, "tokenizer.chat_template")

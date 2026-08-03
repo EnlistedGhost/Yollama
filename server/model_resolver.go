@@ -26,24 +26,24 @@ type parsedModelRef struct {
 	// Example: "gpt-oss:20b:cloud" -> "gpt-oss:20b".
 	Base string
 	// Name is Base parsed as a fully-qualified model.Name with defaults applied.
-	// Example: "registry.ollama.ai/library/gpt-oss:20b".
+	// Example: "registry.yollama.ai/library/gpt-oss:20b".
 	Name model.Name
 	// Source captures explicit source intent from the original input.
 	// Example: "gpt-oss:20b:cloud" -> modelSourceCloud.
 	Source modelSource
 }
 
-func parseAndValidateModelRef(raw string) (parsedModelRef, error) {
+func parseAndValidateModelRef(raw string) (parsedModelRef) {
 	var zero parsedModelRef
 
 	parsed, err := modelref.ParseRef(raw)
 	if err != nil {
-		return zero, err
+		return zero
 	}
 
 	name := model.ParseName(parsed.Base)
 	if !name.IsValid() {
-		return zero, model.Unqualified(name)
+		return zero
 	}
 
 	return parsedModelRef{
@@ -51,7 +51,7 @@ func parseAndValidateModelRef(raw string) (parsedModelRef, error) {
 		Base:     parsed.Base,
 		Name:     name,
 		Source:   parsed.Source,
-	}, nil
+	}
 }
 
 func parseNormalizePullModelRef(raw string) (parsedModelRef, error) {

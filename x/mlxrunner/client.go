@@ -296,7 +296,7 @@ func (c *Client) Load(ctx context.Context, _ ml.SystemInfo, gpus []ml.DeviceInfo
 		exe = eval
 	}
 
-	// Spawn subprocess: ollama runner --mlx-engine --model <name> --port <port>
+	// Spawn subprocess: yollama runner --mlx-engine --model <name> --port <port>
 	cmd := exec.Command(exe, "runner", "--mlx-engine", "--model", c.modelName, "--port", strconv.Itoa(port))
 	cmd.Env = os.Environ()
 
@@ -311,8 +311,8 @@ func (c *Client) Load(ctx context.Context, _ ml.SystemInfo, gpus []ml.DeviceInfo
 	}
 
 	if libPathEnvVar != "" {
-		libraryPaths := []string{ml.LibOllamaPath}
-		if mlxDirs, err := filepath.Glob(filepath.Join(ml.LibOllamaPath, "mlx_*")); err == nil {
+		libraryPaths := []string{ml.LibYollamaPath}
+		if mlxDirs, err := filepath.Glob(filepath.Join(ml.LibYollamaPath, "mlx_*")); err == nil {
 			libraryPaths = append(libraryPaths, mlxDirs...)
 		}
 
@@ -344,7 +344,7 @@ func (c *Client) Load(ctx context.Context, _ ml.SystemInfo, gpus []ml.DeviceInfo
 	// MLX resolves headers via $CUDA_PATH/include/*.h (and checks CUDA_HOME first).
 	// Always use bundled headers to avoid version mismatches with any
 	// system-installed CUDA toolkit.
-	if mlxDirs, err := filepath.Glob(filepath.Join(ml.LibOllamaPath, "mlx_cuda_*")); err == nil {
+	if mlxDirs, err := filepath.Glob(filepath.Join(ml.LibYollamaPath, "mlx_cuda_*")); err == nil {
 		for _, d := range mlxDirs {
 			if _, err := os.Stat(filepath.Join(d, "include")); err == nil {
 				setEnv(cmd, "CUDA_PATH", d)

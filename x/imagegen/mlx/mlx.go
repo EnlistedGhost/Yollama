@@ -1746,8 +1746,8 @@ func findMLXLibraryInDir(dir, libName string) string {
 func findMLXLibrary() string {
 	libName := mlxLibName()
 
-	// 1. OLLAMA_LIBRARY_PATH — check each dir and mlx_* subdirs
-	if paths, ok := os.LookupEnv("OLLAMA_LIBRARY_PATH"); ok {
+	// 1. YOLLAMA_LIBRARY_PATH — check each dir and mlx_* subdirs
+	if paths, ok := os.LookupEnv("YOLLAMA_LIBRARY_PATH"); ok {
 		for _, dir := range filepath.SplitList(paths) {
 			if candidate := findMLXLibraryInDir(dir, libName); candidate != "" {
 				return candidate
@@ -1755,7 +1755,7 @@ func findMLXLibrary() string {
 		}
 	}
 
-	// 2. Executable directory and lib/ollama/mlx* subdirs
+	// 2. Executable directory and lib/yollama/mlx* subdirs
 	if exe, err := os.Executable(); err == nil {
 		if eval, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = eval
@@ -1767,13 +1767,13 @@ func findMLXLibrary() string {
 			return candidate
 		}
 
-		// Check exe_dir/lib/ollama/mlx* subdirectories
-		// and exe_dir/../lib/ollama/mlx* (standard bin/lib sibling layout)
-		for _, libOllamaDir := range []string{
-			filepath.Join(exeDir, "lib", "ollama"),
-			filepath.Join(exeDir, "..", "lib", "ollama"),
+		// Check exe_dir/lib/yollama/mlx* subdirectories
+		// and exe_dir/../lib/yollama/mlx* (standard bin/lib sibling layout)
+		for _, libYollamaDir := range []string{
+			filepath.Join(exeDir, "lib", "yollama"),
+			filepath.Join(exeDir, "..", "lib", "yollama"),
 		} {
-			if candidate := findMLXLibraryInDir(libOllamaDir, libName); candidate != "" {
+			if candidate := findMLXLibraryInDir(libYollamaDir, libName); candidate != "" {
 				return candidate
 			}
 		}
@@ -1782,9 +1782,9 @@ func findMLXLibrary() string {
 	// 3. Build directory (for tests run from repo root)
 	if cwd, err := os.Getwd(); err == nil {
 		for _, dir := range []string{
-			filepath.Join(cwd, "build", "lib", "ollama"),
-			filepath.Join(cwd, "dist", runtime.GOOS+"-"+runtime.GOARCH, "lib", "ollama"),
-			filepath.Join(cwd, "dist", runtime.GOOS+"_"+runtime.GOARCH, "lib", "ollama"),
+			filepath.Join(cwd, "build", "lib", "yollama"),
+			filepath.Join(cwd, "dist", runtime.GOOS+"-"+runtime.GOARCH, "lib", "yollama"),
+			filepath.Join(cwd, "dist", runtime.GOOS+"_"+runtime.GOARCH, "lib", "yollama"),
 		} {
 			if candidate := findMLXLibraryInDir(dir, libName); candidate != "" {
 				return candidate

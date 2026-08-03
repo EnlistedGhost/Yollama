@@ -425,17 +425,17 @@ func readModelListLayers(mf *manifest.Manifest, summary *modelListSummary) (stri
 
 	for _, layer := range mf.Layers {
 		switch layer.MediaType {
-		case "application/vnd.ollama.image.model":
+		case "application/vnd.yollama.image.model":
 			filename, err := manifest.BlobsPath(layer.Digest)
 			if err != nil {
 				return "", 0, nil, err
 			}
 			modelPath = filename
 			summary.Details.ParentModel = layer.From
-		case "application/vnd.ollama.image.projector":
+		case "application/vnd.yollama.image.projector":
 			projectorCount++
-		case "application/vnd.ollama.image.prompt",
-			"application/vnd.ollama.image.template":
+		case "application/vnd.yollama.image.prompt",
+			"application/vnd.yollama.image.template":
 			filename, err := manifest.BlobsPath(layer.Digest)
 			if err != nil {
 				return "", 0, nil, err

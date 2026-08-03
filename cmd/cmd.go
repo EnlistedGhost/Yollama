@@ -50,7 +50,6 @@ import (
 	"github.com/ollama/ollama/types/model"
 	"github.com/ollama/ollama/types/syncmap"
 	"github.com/ollama/ollama/version"
-	xcmd "github.com/ollama/ollama/x/cmd"
 	xcreate "github.com/ollama/ollama/x/create"
 	xcreateclient "github.com/ollama/ollama/x/create/client"
 	"github.com/ollama/ollama/x/imagegen"
@@ -95,7 +94,7 @@ func getModelfileName(cmd *cobra.Command) (string, error) {
 	return absName, nil
 }
 
-// isLocalhost returns true if the configured Ollama host is a loopback or unspecified address.
+// isLocalhost returns true if the configured Yollama host is a loopback or unspecified address.
 func isLocalhost() bool {
 	host := envconfig.Host()
 	h, _, _ := net.SplitHostPort(host.Host)
@@ -338,7 +337,7 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 
 	if err := client.Create(cmd.Context(), req, fn); err != nil {
 		if strings.Contains(err.Error(), "path or Modelfile are required") {
-			return fmt.Errorf("the ollama server must be updated to use `ollama create` with this client")
+			return fmt.Errorf("the yollama server must be updated to use `yollama create` with this client")
 		}
 		return err
 	}
@@ -737,7 +736,7 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 	// If it's an embedding model, handle embedding generation
 	if isEmbeddingModel {
 		if opts.Prompt == "" {
-			return errors.New("embedding models require input text. Usage: ollama run " + name + " \"your text here\"")
+			return errors.New("embedding models require input text. Usage: yollama run " + name + " \"your text here\"")
 		}
 
 		// Get embedding-specific flags
@@ -757,23 +756,13 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 	// Check if this is an image generation model
 	if slices.Contains(info.Capabilities, model.CapabilityImage) {
 		if opts.Prompt == "" && !interactive {
-			return errors.New("image generation models require a prompt. Usage: ollama run " + name + " \"your prompt here\"")
+			return errors.New("image generation models require a prompt. Usage: yollama run " + name + " \"your prompt here\"")
 		}
 		return imagegen.RunCLI(cmd, name, opts.Prompt, interactive, opts.KeepAlive)
 	}
 
-	// Check for experimental flag
-	isExperimental, _ := cmd.Flags().GetBool("experimental")
-	yoloMode, _ := cmd.Flags().GetBool("experimental-yolo")
-	enableWebsearch, _ := cmd.Flags().GetBool("experimental-websearch")
-
 	if interactive {
 		if err := loadOrUnloadModel(cmd, &opts); err != nil {
-			var sErr api.AuthorizationError
-			if errors.As(err, &sErr) && sErr.StatusCode == http.StatusUnauthorized {
-				fmt.Printf("Xllama | Error - Unauthorized!\n\n")
-				return nil
-			}
 			return err
 		}
 
@@ -787,11 +776,6 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 				fmt.Println()
 				fmt.Println()
 			}
-		}
-
-		// Use experimental agent loop with tools
-		if isExperimental {
-			return xcmd.GenerateInteractive(cmd, opts.Model, opts.WordWrap, opts.Options, opts.Think, opts.HideThinking, opts.KeepAlive, yoloMode, enableWebsearch)
 		}
 
 		return generateInteractive(cmd, opts)
@@ -1742,8 +1726,8 @@ func initializeKeypair() error {
 		return err
 	}
 
-	privKeyPath := filepath.Join(home, ".ollama", "id_ed25519")
-	pubKeyPath := filepath.Join(home, ".ollama", "id_ed25519.pub")
+	privKeyPath := filepath.Join(home, ".yollama", "id_ed25519")
+	pubKeyPath := filepath.Join(home, ".yollama", "id_ed25519.pub")
 
 	_, err = os.Stat(privKeyPath)
 	if os.IsNotExist(err) {
@@ -1806,11 +1790,11 @@ func versionHandler(cmd *cobra.Command, _ []string) {
 
 	serverVersion, err := client.Version(cmd.Context())
 	if err != nil {
-		fmt.Println("Warning: could not connect to a running Ollama instance")
+		fmt.Println("Warning: could not connect to a running Yollama instance")
 	}
 
 	if serverVersion != "" {
-		fmt.Printf("ollama version is %s\n", serverVersion)
+		fmt.Printf("yollama version is %s\n", serverVersion)
 	}
 
 	if serverVersion != version.Version {
@@ -1833,7 +1817,7 @@ Environment Variables:
 	cmd.SetUsageTemplate(cmd.UsageTemplate() + envUsage)
 }
 
-// ensureServerRunning checks if the ollama server is running and starts it in the background if not.
+// ensureServerRunning checks if the yollama server is running and starts it in the background if not.
 func ensureServerRunning(ctx context.Context) error {
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
@@ -1942,7 +1926,7 @@ func NewCLI() *cobra.Command {
 	}
 
 	rootCmd := &cobra.Command{
-		Use:           "ollama",
+		Use:           "yollama",
 		Short:         "Large language model runner",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -2034,7 +2018,7 @@ func NewCLI() *cobra.Command {
 	serveCmd := &cobra.Command{
 		Use:     "serve",
 		Aliases: []string{"start"},
-		Short:   "Start Ollama",
+		Short:   "Start Yollama",
 		Args:    cobra.ExactArgs(0),
 		RunE:    RunServer,
 	}
@@ -2099,11 +2083,11 @@ func NewCLI() *cobra.Command {
 			return discover.RunNativeProbeCommand(cmd.Context(), gpuDiscoverLibDirs, os.Stdout)
 		},
 	}
-	gpuDiscoverCmd.Flags().StringArrayVar(&gpuDiscoverLibDirs, "lib-dir", nil, "Ollama runtime library directory")
+	gpuDiscoverCmd.Flags().StringArrayVar(&gpuDiscoverLibDirs, "lib-dir", nil, "Yollama runtime library directory")
 
 	envVars := envconfig.AsMap()
 
-	envs := []envconfig.EnvVar{envVars["OLLAMA_HOST"]}
+	envs := []envconfig.EnvVar{envVars["YOLLAMA_HOST"]}
 
 	for _, cmd := range []*cobra.Command{
 		createCmd,
@@ -2120,30 +2104,30 @@ func NewCLI() *cobra.Command {
 		switch cmd {
 		case runCmd:
 			imagegen.AppendFlagsDocs(cmd)
-			appendEnvDocs(cmd, []envconfig.EnvVar{envVars["OLLAMA_EDITOR"], envVars["OLLAMA_HOST"], envVars["OLLAMA_NOHISTORY"]})
+			appendEnvDocs(cmd, []envconfig.EnvVar{envVars["YOLLAMA_EDITOR"], envVars["YOLLAMA_HOST"], envVars["YOLLAMA_NOHISTORY"]})
 		case serveCmd:
 			appendEnvDocs(cmd, []envconfig.EnvVar{
-				envVars["OLLAMA_DEBUG"],
-				envVars["OLLAMA_HOST"],
-				envVars["OLLAMA_CONTEXT_LENGTH"],
-				envVars["OLLAMA_KEEP_ALIVE"],
-				envVars["OLLAMA_MAX_LOADED_MODELS"],
-				envVars["OLLAMA_MAX_TRANSFER_STREAMS"],
-				envVars["OLLAMA_MAX_QUEUE"],
-				envVars["OLLAMA_MODELS"],
-				envVars["OLLAMA_NUM_PARALLEL"],
-				envVars["OLLAMA_NO_CLOUD"],
-				envVars["OLLAMA_NOPRUNE"],
-				envVars["OLLAMA_ORIGINS"],
-				envVars["OLLAMA_SCHED_SPREAD"],
-				envVars["OLLAMA_FLASH_ATTENTION"],
-				envVars["OLLAMA_KV_CACHE_TYPE"],
-				envVars["OLLAMA_LLM_LIBRARY"],
-				envVars["OLLAMA_GPU_OVERHEAD"],
-				envVars["OLLAMA_IGPU_ENABLE"],
+				envVars["YOLLAMA_DEBUG"],
+				envVars["YOLLAMA_HOST"],
+				envVars["YOLLAMA_CONTEXT_LENGTH"],
+				envVars["YOLLAMA_KEEP_ALIVE"],
+				envVars["YOLLAMA_MAX_LOADED_MODELS"],
+				envVars["YOLLAMA_MAX_TRANSFER_STREAMS"],
+				envVars["YOLLAMA_MAX_QUEUE"],
+				envVars["YOLLAMA_MODELS"],
+				envVars["YOLLAMA_NUM_PARALLEL"],
+				envVars["YOLLAMA_NO_CLOUD"],
+				envVars["YOLLAMA_NOPRUNE"],
+				envVars["YOLLAMA_ORIGINS"],
+				envVars["YOLLAMA_SCHED_SPREAD"],
+				envVars["YOLLAMA_FLASH_ATTENTION"],
+				envVars["YOLLAMA_KV_CACHE_TYPE"],
+				envVars["YOLLAMA_LLM_LIBRARY"],
+				envVars["YOLLAMA_GPU_OVERHEAD"],
+				envVars["YOLLAMA_IGPU_ENABLE"],
 				envVars["LLAMA_ARG_FIT"],
 				envVars["LLAMA_ARG_FIT_TARGET"],
-				envVars["OLLAMA_LOAD_TIMEOUT"],
+				envVars["YOLLAMA_LOAD_TIMEOUT"],
 			})
 		default:
 			appendEnvDocs(cmd, envs)

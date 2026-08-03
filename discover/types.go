@@ -21,7 +21,7 @@ func LogDetails(devices []ml.DeviceInfo) {
 	for _, dev := range devices {
 		var libs []string
 		for _, dir := range dev.LibraryPath {
-			if strings.Contains(dir, filepath.Join("lib", "ollama")) {
+			if strings.Contains(dir, filepath.Join("lib", "yollama")) {
 				libs = append(libs, filepath.Base(dir))
 			}
 		}
@@ -53,7 +53,7 @@ func LogDetails(devices []ml.DeviceInfo) {
 			"compute", "",
 			"name", "cpu",
 			"description", "cpu",
-			"libdirs", "ollama",
+			"libdirs", "yollama",
 			"driver", "",
 			"pci_id", "",
 			"type", "",

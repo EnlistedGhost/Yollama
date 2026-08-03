@@ -1,6 +1,6 @@
 # Tensor Blob Format
 
-Ollama stores model tensors as individual blobs in the safetensors format. Each blob contains a logical tensor (or a combined quantized tensor with its scale/bias components), or a group of logical tensors (e.g. shared experts for a given layer along with the scale/bias components for that tensor).
+Yollama stores model tensors as individual blobs in the safetensors format. Each blob contains a logical tensor (or a combined quantized tensor with its scale/bias components), or a group of logical tensors (e.g. shared experts for a given layer along with the scale/bias components for that tensor).
 
 ## Safetensors File Format
 
@@ -98,7 +98,7 @@ Blobs are referenced from the model manifest as layers:
 
 ```json
 {
-  "mediaType": "application/vnd.ollama.image.tensor",
+  "mediaType": "application/vnd.yollama.image.tensor",
   "digest": "sha256:abc123...",
   "size": 4096150,
   "name": "model.layers.0.mlp.up_proj.weight"
@@ -144,7 +144,7 @@ One manifest layer per packed group, using the group prefix as the layer name:
 
 ```json
 {
-  "mediaType": "application/vnd.ollama.image.tensor",
+  "mediaType": "application/vnd.yollama.image.tensor",
   "digest": "sha256:...",
   "size": 123456789,
   "name": "model.layers.1.mlp.experts"
