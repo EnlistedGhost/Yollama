@@ -18,9 +18,6 @@ import (
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/fs/ggml"
 	"github.com/ollama/ollama/manifest"
-	"github.com/ollama/ollama/model/parsers"
-	ollamatemplate "github.com/ollama/ollama/template"
-	"github.com/ollama/ollama/thinking"
 	"github.com/ollama/ollama/types/model"
 )
 
@@ -337,7 +334,7 @@ func buildModelListSummary(name model.Name, mf *manifest.Manifest) (modelListSum
 		},
 	}
 
-	modelPath, projectorCount, tmpl, err := readModelListLayers(mf, &summary)
+	modelPath, projectorCount, err := readModelListLayers(mf, &summary)
 	if err != nil {
 		return modelListSummary{}, err
 	}
@@ -364,37 +361,10 @@ func buildModelListSummary(name model.Name, mf *manifest.Manifest) (modelListSum
 		summary.Capabilities = appendModelListCapability(summary.Capabilities, model.Capability(c))
 	}
 
-	builtinParser := parsers.ParserForName(cfg.Parser)
-	if tmpl != nil {
-		vars, err := tmpl.Vars()
-		if err != nil {
-			slog.Warn("model template contains errors", "model", name.String(), "error", err)
-		}
-		if slices.Contains(vars, "tools") || (builtinParser != nil && builtinParser.HasToolSupport()) {
-			summary.Capabilities = appendModelListCapability(summary.Capabilities, model.CapabilityTools)
-		}
-		if slices.Contains(vars, "suffix") {
-			summary.Capabilities = appendModelListCapability(summary.Capabilities, model.CapabilityInsert)
-		}
-
-		openingTag, closingTag := thinking.InferTags(tmpl.Template)
-		hasTags := openingTag != "" && closingTag != ""
-		isGptoss := slices.Contains([]string{"gptoss", "gpt-oss"}, cfg.ModelFamily)
-		if !slices.Contains(summary.Capabilities, model.CapabilityThinking) &&
-			(hasTags || isGptoss || (builtinParser != nil && builtinParser.HasThinkingSupport())) {
-			summary.Capabilities = appendModelListCapability(summary.Capabilities, model.CapabilityThinking)
-		}
-	}
-
 	if projectorCount > 0 {
 		summary.Capabilities = appendModelListCapability(summary.Capabilities, model.CapabilityVision)
 	}
 
-	if cfg.ModelFormat == "safetensors" && isGemma4Renderer(cfg.Renderer) {
-		summary.Capabilities = slices.DeleteFunc(summary.Capabilities, func(c model.Capability) bool {
-			return c == model.CapabilityVision || c == model.CapabilityAudio
-		})
-	}
 
 	return summary, nil
 }
@@ -418,17 +388,17 @@ func readModelListConfig(mf *manifest.Manifest) (model.ConfigV2, error) {
 	return cfg, nil
 }
 
-func readModelListLayers(mf *manifest.Manifest, summary *modelListSummary) (string, int, *ollamatemplate.Template, error) {
+func readModelListLayers(mf *manifest.Manifest, summary *modelListSummary) (string, int, error) {
 	var modelPath string
 	var projectorCount int
-	tmpl := ollamatemplate.DefaultTemplate
+	//tmpl := ollamatemplate.DefaultTemplate
 
 	for _, layer := range mf.Layers {
 		switch layer.MediaType {
 		case "application/vnd.yollama.image.model":
 			filename, err := manifest.BlobsPath(layer.Digest)
 			if err != nil {
-				return "", 0, nil, err
+				return "", 0, err
 			}
 			modelPath = filename
 			summary.Details.ParentModel = layer.From
@@ -438,21 +408,22 @@ func readModelListLayers(mf *manifest.Manifest, summary *modelListSummary) (stri
 			"application/vnd.yollama.image.template":
 			filename, err := manifest.BlobsPath(layer.Digest)
 			if err != nil {
-				return "", 0, nil, err
+				return "", 0, err
 			}
-			bts, err := os.ReadFile(filename)
+			LOCALpath, err := os.ReadFile(filename)
 			if err != nil {
-				return "", 0, nil, err
+				return "", 0, err
 			}
+			fmt.Println("Yollama has read model blob file:", LOCALpath)
 
-			tmpl, err = ollamatemplate.Parse(string(bts))
-			if err != nil {
-				return "", 0, nil, err
-			}
+			//tmpl, err = ollamatemplate.Parse(string(bts))
+			//if err != nil {
+			//	return "", 0, nil, err
+			//}
 		}
 	}
 
-	return modelPath, projectorCount, tmpl, nil
+	return modelPath, projectorCount, nil
 }
 
 type modelListGGUF struct {

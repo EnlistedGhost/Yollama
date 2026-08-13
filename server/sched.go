@@ -9,7 +9,6 @@ import (
 	"os"
 	"reflect"
 	"runtime"
-	"slices"
 	"sort"
 	"strings"
 	"strconv"
@@ -26,8 +25,6 @@ import (
 	"github.com/ollama/ollama/logutil"
 	"github.com/ollama/ollama/ml"
 	"github.com/ollama/ollama/types/model"
-	"github.com/ollama/ollama/x/imagegen"
-	"github.com/ollama/ollama/x/mlxrunner"
 )
 
 type LlmRequest struct {
@@ -500,7 +497,7 @@ func getPathBatchNumConfig() (string, error) {
 	ollamaPath := filepath.Join(homeUserDir, ".yollama")
 	fmt.Println("Yollama directory:", ollamaPath)
 	
-	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "ollamaloader.conf")
+	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "yollamaloader.conf")
 	return pathSchedBatchNumConfig, err
 }
 
@@ -546,7 +543,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 
 	if llama == nil {
 		var err error
-		if !req.model.IsMLX() {
+
 			// Get path batch num config file
 			pathBatchNumConfig, err := getPathBatchNumConfig()
 			if err != nil {
@@ -622,14 +619,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 					err = fmt.Errorf("%v: this model may be incompatible with your version of Yollama. If you previously pulled this model, try updating it by running `yollama pull %s`", err, req.model.ShortName)
 				}
 			}
-		} else {
-			modelName := req.model.ShortName
-			if slices.Contains(req.model.Config.Capabilities, "image") {
-				llama, err = imagegen.NewServer(modelName)
-			} else {
-				llama, err = mlxrunner.NewClient(modelName)
-			}
-		}
+		
 		if err != nil {
 			slog.Info("failed to create server", "model", req.model.ShortName, "error", err)
 			req.errCh <- err
@@ -742,7 +732,6 @@ iGPUScan:
 		sessionDuration: sessionDuration,
 		gpus:            gpuIDs,
 		discreteGPUs:    discreteGPUs,
-		isImagegen:      slices.Contains(req.model.Config.Capabilities, "image"),
 		totalSize:       totalSize,
 		vramSize:        vramSize,
 		loading:         true,
@@ -1347,7 +1336,6 @@ type runnerRef struct {
 	loading      bool          // True only during initial load, then false forever
 	gpus         []ml.DeviceID // Recorded at time of provisioning
 	discreteGPUs bool          // True if all devices are discrete GPUs - used to skip VRAM recovery check for iGPUs
-	isImagegen   bool          // True if loaded via imagegen runner (vs mlxrunner)
 	vramSize     uint64
 	totalSize    uint64
 
@@ -1385,12 +1373,6 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 	slog.Debug("evaluating already loaded", "model", schedulerModelKey(req.model))
 	runner.refMu.Lock()
 	defer runner.refMu.Unlock()
-
-	// Check if runner type (imagegen vs mlxrunner) matches what's requested.
-	wantImagegen := slices.Contains(req.model.Config.Capabilities, "image")
-	if runner.isImagegen != wantImagegen {
-		return true
-	}
 
 	timeout := 10 * time.Second
 	if runner.loading {
@@ -1430,7 +1412,7 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 	defer cancel()
 	if !reflect.DeepEqual(runner.model.AdapterPaths, req.model.AdapterPaths) || // have the adapters changed?
 		!reflect.DeepEqual(runner.model.ProjectorPaths, req.model.ProjectorPaths) || // have the projectors changed?
-		(!runner.model.IsMLX() && !reflect.DeepEqual(optsExisting, optsNew)) || // have the runner options changed?
+		!reflect.DeepEqual(optsExisting, optsNew) || // have the runner options changed?
 		runner.llama.Ping(ctx) != nil {
 		return true
 	}

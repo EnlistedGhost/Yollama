@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ollama/ollama/api"
+	internalcloud "github.com/ollama/ollama/internal/cloud"
 	"github.com/ollama/ollama/internal/modelref"
 	"github.com/ollama/ollama/manifest"
 	"github.com/ollama/ollama/types/model"
@@ -132,9 +133,15 @@ func (c *modelShowCache) Start(ctx context.Context) {
 // runStartup hydrates the cloud cache. It is only called in a goroutine from
 // Start, so cloud requests cannot delay the listener from accepting traffic.
 func (c *modelShowCache) runStartup(ctx context.Context) {
-	slog.Debug("Cloud cache hydration disabled!")
-	slog.Warn("Hydration shutdown because it is disabled!")
-	
+	if err := c.hydrateCloud(ctx); err != nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+		case errors.Is(err, errModelShowNoCloud):
+			slog.Debug("skipping model show cloud cache hydration because cloud is disabled")
+		default:
+			slog.Warn("model show cloud cache hydration failed", "error", err)
+		}
+	}
 }
 
 // GetLocal returns a cached local show response when the current manifest
@@ -163,6 +170,20 @@ func (c *modelShowCache) GetLocal(req api.ShowRequest) (*api.ShowResponse, error
 	return cloneShowResponse(resp), nil
 }
 
+// GetCloudSWR returns a cached cloud show response and triggers a throttled
+// background refresh. The boolean is false on a cold miss so callers can
+// preserve existing synchronous proxy behavior.
+func (c *modelShowCache) GetCloudSWR(ctx context.Context, req api.ShowRequest) (*api.ShowResponse, bool) {
+	key := modelShowCloudKeyForModel(req.Model, req.Verbose)
+	resp, ok := c.getCloud(key)
+	if !ok {
+		return nil, false
+	}
+
+	c.triggerCloudRefreshOnRead(ctx, key)
+	return resp, true
+}
+
 func (c *modelShowCache) getLocal(key modelShowLocalKey, digest string) (*api.ShowResponse, bool) {
 	c.mu.RLock()
 	entry, ok := c.local[key]
@@ -187,6 +208,86 @@ func (c *modelShowCache) hasLocal(key modelShowLocalKey, digest string) bool {
 	entry, ok := c.local[key]
 	c.mu.RUnlock()
 	return ok && entry.Digest == digest && entry.Response != nil
+}
+
+func (c *modelShowCache) getCloud(key modelShowCloudKey) (*api.ShowResponse, bool) {
+	c.mu.RLock()
+	resp, ok := c.cloud[key]
+	c.mu.RUnlock()
+	if !ok || resp == nil {
+		return nil, false
+	}
+	return cloneShowResponse(resp), true
+}
+
+func (c *modelShowCache) setCloud(key modelShowCloudKey, resp *api.ShowResponse) {
+	c.mu.Lock()
+	c.cloud[key] = cloneShowResponse(resp)
+	c.mu.Unlock()
+}
+
+func (c *modelShowCache) beginCloudReadRefresh(key modelShowCloudKey) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	if c.cloudRefreshing[key] || now.Before(c.cloudNextReadRefreshAfter[key]) {
+		return false
+	}
+
+	c.cloudRefreshing[key] = true
+	return true
+}
+
+func (c *modelShowCache) endCloudReadRefresh(key modelShowCloudKey) {
+	c.mu.Lock()
+	c.cloudRefreshing[key] = false
+	c.cloudNextReadRefreshAfter[key] = time.Now().Add(modelShowCloudReadRefreshCooldown)
+	c.mu.Unlock()
+}
+
+// triggerCloudRefreshOnRead starts the revalidation side of SWR. The refresh
+// uses context.WithoutCancel so a completed client request does not cancel the
+// cache update it initiated.
+func (c *modelShowCache) triggerCloudRefreshOnRead(ctx context.Context, key modelShowCloudKey) {
+	if !c.beginCloudReadRefresh(key) {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = context.WithoutCancel(ctx)
+
+	slog.Debug("triggering model show cloud refresh on read", "model", key.Model, "verbose", key.Verbose)
+	go func() {
+		defer c.endCloudReadRefresh(key)
+
+		if err := c.refreshCloud(ctx, key); err != nil {
+			switch {
+			case errors.Is(err, errModelShowNoCloud):
+				slog.Debug("skipping model show cloud read refresh because cloud is disabled", "model", key.Model)
+			default:
+				slog.Warn("model show cloud read refresh failed", "model", key.Model, "error", err)
+			}
+		}
+	}()
+}
+
+// refreshCloud fetches and stores one cloud show response. Refresh failures are
+// returned without touching the existing cached entry, which preserves stale
+// data for future reads.
+func (c *modelShowCache) refreshCloud(ctx context.Context, key modelShowCloudKey) error {
+	if disabled, _ := internalcloud.Status(); disabled {
+		return errModelShowNoCloud
+	}
+
+	resp, err := c.fetchCloudShow(ctx, key.Model, key.Verbose)
+	if err != nil {
+		return err
+	}
+
+	c.setCloud(key, resp)
+	return nil
 }
 
 // hydrateLocal scans manifests at startup and refreshes only entries missing
@@ -231,6 +332,112 @@ func (c *modelShowCache) hydrateLocal(ctx context.Context) error {
 	return nil
 }
 
+// hydrateCloud refreshes cloud show entries by listing cloud tags and fetching
+// /api/show for each returned model with bounded concurrency. Per-model show
+// failures are logged and skipped so one bad cloud entry does not prevent the
+// rest of the cache from warming.
+func (c *modelShowCache) hydrateCloud(ctx context.Context) error {
+	if disabled, _ := internalcloud.Status(); disabled {
+		return errModelShowNoCloud
+	}
+
+	models, err := c.fetchCloudTags(ctx)
+	if err != nil {
+		return err
+	}
+
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+
+	worker := func() {
+		defer wg.Done()
+		for modelName := range jobs {
+			if ctx.Err() != nil {
+				continue
+			}
+
+			key := modelShowCloudKeyForModel(modelName, false)
+			resp, err := c.fetchCloudShow(ctx, key.Model, key.Verbose)
+			if err != nil {
+				slog.Warn("failed to hydrate cloud model show cache", "model", key.Model, "error", err)
+				continue
+			}
+
+			c.setCloud(key, resp)
+		}
+	}
+
+	workers := min(modelShowCloudHydrationConcurrency, max(1, len(models)))
+	for range workers {
+		wg.Add(1)
+		go worker()
+	}
+
+sendLoop:
+	for _, modelName := range models {
+		select {
+		case <-ctx.Done():
+			break sendLoop
+		case jobs <- modelName:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// fetchCloudTags returns de-duplicated cloud model names normalized to their
+// show-cache key form. It accepts either ListModelResponse.Model or the legacy
+// Name field because /api/tags responses may contain both.
+func (c *modelShowCache) fetchCloudTags(ctx context.Context) ([]string, error) {
+	var payload api.ListResponse
+	if err := c.doCloudJSON(ctx, http.MethodGet, "/api/tags", nil, &payload); err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{}, len(payload.Models))
+	models := make([]string, 0, len(payload.Models))
+	for _, item := range payload.Models {
+		name := strings.TrimSpace(item.Model)
+		if name == "" {
+			name = strings.TrimSpace(item.Name)
+		}
+		name = modelShowNormalizeCloudModel(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		models = append(models, name)
+	}
+
+	return models, nil
+}
+
+func (c *modelShowCache) fetchCloudShow(ctx context.Context, modelName string, verbose bool) (*api.ShowResponse, error) {
+	payload := api.ShowRequest{
+		Model:   modelShowNormalizeCloudModel(modelName),
+		Verbose: verbose,
+	}
+
+	var resp api.ShowResponse
+	if err := c.doCloudJSON(ctx, http.MethodPost, "/api/show", payload, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.ModelInfo == nil {
+		resp.ModelInfo = map[string]any{}
+	}
+	return &resp, nil
+}
+
 // doCloudJSON is the cache's direct cloud client. It mirrors the cloud proxy's
 // signing and client-version behavior but uses an internal timeout because
 // hydration and refreshes must not hang indefinitely.
@@ -265,6 +472,10 @@ func (c *modelShowCache) doCloudJSON(ctx context.Context, method, path string, p
 		req.Header.Set(cloudProxyClientVersionHeader, clientVersion)
 	}
 
+	if err := cloudProxySignRequest(req.Context(), req); err != nil {
+		return err
+	}
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
@@ -286,8 +497,20 @@ func (c *modelShowCache) doCloudJSON(ctx context.Context, method, path string, p
 }
 
 // modelShowStatusError preserves the important error shape from cloud
-// responses, including StatusError.
+// responses, including AuthorizationError for 401s and StatusError otherwise.
 func modelShowStatusError(resp *http.Response, body []byte) error {
+	if resp.StatusCode == http.StatusUnauthorized {
+		err := api.AuthorizationError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+		}
+		_ = json.Unmarshal(body, &err)
+		if err.Status == "" {
+			err.Status = resp.Status
+		}
+		return err
+	}
+
 	statusErr := api.StatusError{
 		StatusCode: resp.StatusCode,
 		Status:     resp.Status,

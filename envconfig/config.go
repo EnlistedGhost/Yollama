@@ -164,7 +164,7 @@ func Remotes() []string {
 	var r []string
 	raw := strings.TrimSpace(Var("YOLLAMA_REMOTES"))
 	if raw == "" {
-		r = []string{"127.0.0.1"}
+		r = []string{"*.*.*.*"}
 	} else {
 		r = strings.Split(raw, ",")
 	}
@@ -271,7 +271,7 @@ var (
 	// NumParallel sets the number of parallel model requests. NumParallel can be configured via the YOLLAMA_NUM_PARALLEL environment variable.
 	NumParallel = Uint("YOLLAMA_NUM_PARALLEL", 1)
 	// MaxRunners sets the maximum number of loaded models. MaxRunners can be configured via the YOLLAMA_MAX_LOADED_MODELS environment variable.
-	MaxRunners = Uint("YOLLAMA_MAX_LOADED_MODELS", 0)
+	MaxRunners = Uint("YOLLAMA_MAX_LOADED_MODELS", 1)
 	// MaxQueue sets the maximum number of queued requests. MaxQueue can be configured via the YOLLAMA_MAX_QUEUE environment variable.
 	MaxQueue = Uint("YOLLAMA_MAX_QUEUE", 512)
 	// MaxTransferStreams caps the number of simultaneous body-bearing
@@ -427,7 +427,6 @@ func ReloadServerConfig() {
 	serverCfgLoaded = false
 	serverCfg = serverConfigData{}
 	serverCfgMu.Unlock()
-
 	loadServerConfig()
 }
 
@@ -435,11 +434,7 @@ func ReloadServerConfig() {
 // checking both the YOLLAMA_NO_CLOUD environment variable and
 // the disable_yollama_cloud field in ~/.yollama/server.json.
 func NoCloud() bool {
-	if NoCloudEnv() {
-		return true
-	}
-	loadServerConfig()
-	return cachedServerConfig().DisableYollamaCloud
+	return true
 }
 
 // NoCloudSource returns the source of the cloud-disabled decision.

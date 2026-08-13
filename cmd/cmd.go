@@ -44,15 +44,10 @@ import (
 	"github.com/ollama/ollama/internal/modelref"
 	"github.com/ollama/ollama/parser"
 	"github.com/ollama/ollama/progress"
-	"github.com/ollama/ollama/readline"
-	"github.com/ollama/ollama/runner"
 	"github.com/ollama/ollama/server"
 	"github.com/ollama/ollama/types/model"
 	"github.com/ollama/ollama/types/syncmap"
 	"github.com/ollama/ollama/version"
-	xcreate "github.com/ollama/ollama/x/create"
-	xcreateclient "github.com/ollama/ollama/x/create/client"
-	"github.com/ollama/ollama/x/imagegen"
 )
 
 const ConnectInstructions = "If your browser did not open, navigate to:\n    %s\n\n"
@@ -105,39 +100,6 @@ func isLocalhost() bool {
 	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
-func resolveExperimentalLocalModelDir(ref, filename string) string {
-	if ref == "" || filepath.IsAbs(ref) || filename == "" {
-		return ref
-	}
-
-	candidate := filepath.Join(filepath.Dir(filename), ref)
-	if xcreate.IsSafetensorsModelDir(candidate) || xcreate.IsTensorModelDir(candidate) {
-		return candidate
-	}
-
-	return ref
-}
-
-func resolveExperimentalDraftDir(ref, filename string) (string, error) {
-	if ref == "" {
-		return "", nil
-	}
-	if filepath.IsAbs(ref) {
-		if xcreate.IsSafetensorsModelDir(ref) {
-			return ref, nil
-		}
-		return "", fmt.Errorf("draft %s is not a supported safetensors model directory", ref)
-	}
-	if filename != "" {
-		candidate := filepath.Join(filepath.Dir(filename), ref)
-		if xcreate.IsSafetensorsModelDir(candidate) {
-			return candidate, nil
-		}
-	}
-
-	return "", fmt.Errorf("DRAFT model references are not supported with --experimental yet: %s", ref)
-}
-
 func CreateHandler(cmd *cobra.Command, args []string) error {
 	p := progress.NewProgress(os.Stderr)
 	defer p.Stop()
@@ -147,62 +109,6 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 	name := model.ParseName(modelName)
 	if !name.IsValid() {
 		return fmt.Errorf("invalid model name: %s", modelName)
-	}
-
-	// Check for --experimental flag for safetensors model creation
-	// This gates both safetensors LLM and imagegen model creation
-	experimental, _ := cmd.Flags().GetBool("experimental")
-	draftQuantize, _ := cmd.Flags().GetString("draft-quantize")
-	if experimental {
-		if !isLocalhost() {
-			return errors.New("remote safetensor model creation not yet supported")
-		}
-
-		// Get Modelfile content - either from -f flag or default to "FROM ."
-		var reader io.Reader
-		filename, err := getModelfileName(cmd)
-		if os.IsNotExist(err) || filename == "" {
-			// No Modelfile specified or found - use default
-			reader = strings.NewReader("FROM .\n")
-		} else if err != nil {
-			return err
-		} else {
-			f, err := os.Open(filename)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			reader = f
-		}
-
-		// Parse the Modelfile
-		modelfile, err := parser.ParseFile(reader)
-		if err != nil {
-			return fmt.Errorf("failed to parse Modelfile: %w", err)
-		}
-
-		modelDir, mfConfig, err := xcreateclient.ConfigFromModelfile(modelfile)
-		if err != nil {
-			return err
-		}
-
-		modelDir = resolveExperimentalLocalModelDir(modelDir, filename)
-		if mfConfig.Draft != "" {
-			draftDir, err := resolveExperimentalDraftDir(mfConfig.Draft, filename)
-			if err != nil {
-				return err
-			}
-			mfConfig.Draft = draftDir
-		}
-
-		quantize, _ := cmd.Flags().GetString("quantize")
-		return xcreateclient.CreateModel(xcreateclient.CreateOptions{
-			ModelName:     modelName,
-			ModelDir:      modelDir,
-			Quantize:      quantize,
-			DraftQuantize: draftQuantize,
-			Modelfile:     mfConfig,
-		}, p)
 	}
 
 	// Standard Modelfile + API path
@@ -247,12 +153,6 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 	if quantize != "" {
 		req.Quantize = quantize
 	}
-	if draftQuantize != "" {
-		if len(req.DraftFiles) == 0 {
-			return errors.New("--draft-quantize requires a DRAFT model")
-		}
-		req.DraftQuantize = draftQuantize
-	}
 
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
@@ -288,26 +188,12 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	draftFiles := syncmap.NewSyncMap[string, string]()
-	draftFileNames := createRequestFileNames(req.DraftFiles)
-	for f, digest := range req.DraftFiles {
-		g.Go(func() error {
-			if _, err := createBlob(cmd, client, f, digest, p); err != nil {
-				return err
-			}
-
-			draftFiles.Store(draftFileNames[f], digest)
-			return nil
-		})
-	}
-
 	if err := g.Wait(); err != nil {
 		return err
 	}
 
 	req.Files = files.Items()
 	req.Adapters = adapters.Items()
-	req.DraftFiles = draftFiles.Items()
 
 	bars := make(map[string]*progress.Bar)
 	fn := func(resp api.ProgressResponse) error {
@@ -753,16 +639,13 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		return generateEmbedding(cmd, name, opts.Prompt, opts.KeepAlive, truncate, dimensions)
 	}
 
-	// Check if this is an image generation model
-	if slices.Contains(info.Capabilities, model.CapabilityImage) {
-		if opts.Prompt == "" && !interactive {
-			return errors.New("image generation models require a prompt. Usage: yollama run " + name + " \"your prompt here\"")
-		}
-		return imagegen.RunCLI(cmd, name, opts.Prompt, interactive, opts.KeepAlive)
-	}
-
 	if interactive {
 		if err := loadOrUnloadModel(cmd, &opts); err != nil {
+			var sErr api.AuthorizationError
+			if errors.As(err, &sErr) && sErr.StatusCode == http.StatusUnauthorized {
+				fmt.Printf("Yollama | Error - Unauthorized!\n\n")
+				return nil
+			}
 			return err
 		}
 
@@ -1425,24 +1308,14 @@ func displayResponse(content string, wordWrap bool, state *displayResponseState)
 	}
 }
 
-func thinkingOutputOpeningText(plainText bool) string {
-	text := "Thinking...\n"
-
-	if plainText {
-		return text
-	}
-
-	return readline.ColorGrey + readline.ColorBold + text + readline.ColorDefault + readline.ColorGrey
+func thinkingOutputOpeningText() string {
+	text := "[think]\n"
+	return text
 }
 
-func thinkingOutputClosingText(plainText bool) string {
-	text := "...done thinking.\n\n"
-
-	if plainText {
-		return text
-	}
-
-	return readline.ColorGrey + readline.ColorBold + text + readline.ColorDefault
+func thinkingOutputClosingText() string {
+	text := "[/think]\n\n"
+	return text
 }
 
 func chat(cmd *cobra.Command, opts runOptions) (*api.Message, error) {
@@ -1485,9 +1358,9 @@ func chat(cmd *cobra.Command, opts runOptions) (*api.Message, error) {
 		latest = response
 
 		role = response.Message.Role
-		if response.Message.Thinking != "" && !opts.HideThinking {
+		if response.Message.Thinking != "" {
 			if !thinkTagOpened {
-				fmt.Print(thinkingOutputOpeningText(false))
+				fmt.Print(thinkingOutputOpeningText())
 				thinkTagOpened = true
 				thinkTagClosed = false
 			}
@@ -1496,28 +1369,14 @@ func chat(cmd *cobra.Command, opts runOptions) (*api.Message, error) {
 		}
 
 		content := response.Message.Content
-		if thinkTagOpened && !thinkTagClosed && (content != "" || len(response.Message.ToolCalls) > 0) {
-			if !strings.HasSuffix(thinkingContent.String(), "\n") {
-				fmt.Println()
-			}
-			fmt.Print(thinkingOutputClosingText(false))
+		if thinkTagOpened && !thinkTagClosed && content != "" {
+			fmt.Print(thinkingOutputClosingText())
 			thinkTagOpened = false
 			thinkTagClosed = true
 			state = &displayResponseState{}
 		}
-		// purposefully not putting thinking blocks in the response, which would
-		// only be needed if we later added tool calling to the cli (they get
-		// filtered out anyway since current models don't expect them unless you're
-		// about to finish some tool calls)
+		// purposefully not putting thinking blocks in the response
 		fullResponse.WriteString(content)
-
-		if response.Message.ToolCalls != nil {
-			toolCalls := response.Message.ToolCalls
-			if len(toolCalls) > 0 {
-				fmt.Print(renderToolCalls(toolCalls, false))
-			}
-		}
-
 		displayResponse(content, opts.WordWrap, state)
 
 		return nil
@@ -1544,13 +1403,6 @@ func chat(cmd *cobra.Command, opts runOptions) (*api.Message, error) {
 			return nil, nil
 		}
 
-		// this error should ideally be wrapped properly by the client
-		if strings.Contains(err.Error(), "upstream error") {
-			p.StopAndClear()
-			fmt.Println("An error occurred while processing your message. Please try again.")
-			fmt.Println()
-			return nil, nil
-		}
 		return nil, err
 	}
 
@@ -1606,19 +1458,17 @@ func generate(cmd *cobra.Command, opts runOptions) error {
 	var thinkTagOpened bool = false
 	var thinkTagClosed bool = false
 
-	plainText := !term.IsTerminal(int(os.Stdout.Fd()))
-
 	fn := func(response api.GenerateResponse) error {
 		latest = response
 		content := response.Response
 
-		if response.Response != "" || !opts.HideThinking {
-			p.StopAndClear()
-		}
+		//if response.Response != "" {
+		//	p.StopAndClear()
+		//}
 
-		if response.Thinking != "" && !opts.HideThinking {
+		if response.Thinking != "" {
 			if !thinkTagOpened {
-				fmt.Print(thinkingOutputOpeningText(plainText))
+				fmt.Print(thinkingOutputOpeningText())
 				thinkTagOpened = true
 				thinkTagClosed = false
 			}
@@ -1626,24 +1476,17 @@ func generate(cmd *cobra.Command, opts runOptions) error {
 			displayResponse(response.Thinking, opts.WordWrap, state)
 		}
 
-		if thinkTagOpened && !thinkTagClosed && (content != "" || len(response.ToolCalls) > 0) {
+		if thinkTagOpened && !thinkTagClosed && (content != "") {
 			if !strings.HasSuffix(thinkingContent.String(), "\n") {
 				fmt.Println()
 			}
-			fmt.Print(thinkingOutputClosingText(plainText))
+			fmt.Print(thinkingOutputClosingText())
 			thinkTagOpened = false
 			thinkTagClosed = true
 			state = &displayResponseState{}
 		}
 
 		displayResponse(content, opts.WordWrap, state)
-
-		if response.ToolCalls != nil {
-			toolCalls := response.ToolCalls
-			if len(toolCalls) > 0 {
-				fmt.Print(renderToolCalls(toolCalls, plainText))
-			}
-		}
 
 		return nil
 	}
@@ -1927,7 +1770,7 @@ func NewCLI() *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:           "yollama",
-		Short:         "Large language model runner",
+		Short:         "Large language Model Runner",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		CompletionOptions: cobra.CompletionOptions{
@@ -1950,19 +1793,14 @@ func NewCLI() *cobra.Command {
 		Short: "Create a model",
 		Args:  cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			// Skip server check for experimental mode (writes directly to disk)
-			if experimental, _ := cmd.Flags().GetBool("experimental"); experimental {
-				return nil
-			}
-			return checkServerHeartbeat(cmd, args)
+			// Skip server check (writes directly to disk)
+			return nil
+			//return checkServerHeartbeat(cmd, args)
 		},
 		RunE: CreateHandler,
 	}
 
 	createCmd.Flags().StringP("file", "f", "", "Name of the Modelfile (default \"Modelfile\")")
-	createCmd.Flags().StringP("quantize", "q", "", "Quantize model to this level (e.g. q4_K_M)")
-	createCmd.Flags().String("draft-quantize", "", "Quantize draft model to this level")
-	createCmd.Flags().Bool("experimental", false, "Enable experimental safetensors model creation")
 
 	showCmd := &cobra.Command{
 		Use:     "show MODEL",
@@ -1987,9 +1825,9 @@ func NewCLI() *cobra.Command {
 		RunE:    RunHandler,
 	}
 
-	runCmd.Flags().String("keepalive", "", "Duration to keep a model loaded (e.g. 5m)")
+	runCmd.Flags().String("keepalive", "995m", "Duration to keep a model loaded (e.g. 5m)")
 	runCmd.Flags().Bool("verbose", false, "Show timings for response")
-	runCmd.Flags().Bool("insecure", false, "Use an insecure registry")
+	runCmd.Flags().Bool("insecure", true, "Use an insecure registry")
 	runCmd.Flags().Bool("nowordwrap", false, "Don't wrap words to the next line automatically")
 	runCmd.Flags().String("format", "", "Response format (e.g. json)")
 	runCmd.Flags().String("think", "", "Enable thinking mode: true/false or high/medium/low for supported models")
@@ -1997,15 +1835,6 @@ func NewCLI() *cobra.Command {
 	runCmd.Flags().Bool("hidethinking", false, "Hide thinking output (if provided)")
 	runCmd.Flags().Bool("truncate", false, "For embedding models: truncate inputs exceeding context length (default: true). Set --truncate=false to error instead")
 	runCmd.Flags().Int("dimensions", 0, "Truncate output embeddings to specified dimension (embedding models only)")
-	runCmd.Flags().Bool("experimental", false, "Enable experimental agent loop with tools")
-	runCmd.Flags().Bool("experimental-yolo", false, "Skip all tool approval prompts (use with caution)")
-	runCmd.Flags().Bool("experimental-websearch", false, "Enable web search tool in experimental mode")
-
-	// Image generation flags (width, height, steps, seed, etc.)
-	imagegen.RegisterFlags(runCmd)
-
-	runCmd.Flags().Bool("imagegen", false, "Use the imagegen runner for LLM inference")
-	runCmd.Flags().MarkHidden("imagegen")
 
 	stopCmd := &cobra.Command{
 		Use:     "stop MODEL",
@@ -2025,13 +1854,13 @@ func NewCLI() *cobra.Command {
 
 	pullCmd := &cobra.Command{
 		Use:     "pull MODEL",
-		Short:   "Pull a model from a registry",
+		Short:   "Pull a model from a network location",
 		Args:    cobra.ExactArgs(1),
 		PreRunE: checkServerHeartbeat,
 		RunE:    PullHandler,
 	}
 
-	pullCmd.Flags().Bool("insecure", false, "Use an insecure registry")
+	pullCmd.Flags().Bool("insecure", true, "Use an insecure registry")
 
 	listCmd := &cobra.Command{
 		Use:     "list",
@@ -2063,18 +1892,6 @@ func NewCLI() *cobra.Command {
 		RunE:    DeleteHandler,
 	}
 
-	runnerCmd := &cobra.Command{
-		Use:    "runner",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runner.Execute(os.Args[1:])
-		},
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
-	}
-	runnerCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		_ = runner.Execute(args[1:])
-	})
-
 	var gpuDiscoverLibDirs []string
 	gpuDiscoverCmd := &cobra.Command{
 		Use:    "gpu-discover",
@@ -2103,7 +1920,6 @@ func NewCLI() *cobra.Command {
 	} {
 		switch cmd {
 		case runCmd:
-			imagegen.AppendFlagsDocs(cmd)
 			appendEnvDocs(cmd, []envconfig.EnvVar{envVars["YOLLAMA_EDITOR"], envVars["YOLLAMA_HOST"], envVars["YOLLAMA_NOHISTORY"]})
 		case serveCmd:
 			appendEnvDocs(cmd, []envconfig.EnvVar{
@@ -2145,7 +1961,6 @@ func NewCLI() *cobra.Command {
 		psCmd,
 		copyCmd,
 		deleteCmd,
-		runnerCmd,
 		gpuDiscoverCmd,
 	)
 
@@ -2191,30 +2006,4 @@ func inferThinkingOption(caps *[]model.Capability, runOpts *runOptions, explicit
 	}
 
 	return nil, nil
-}
-
-func renderToolCalls(toolCalls []api.ToolCall, plainText bool) string {
-	out := ""
-	formatExplanation := ""
-	formatValues := ""
-	if !plainText {
-		formatExplanation = readline.ColorGrey + readline.ColorBold
-		formatValues = readline.ColorDefault
-		out += formatExplanation
-	}
-	for i, toolCall := range toolCalls {
-		argsAsJSON, err := json.Marshal(toolCall.Function.Arguments)
-		if err != nil {
-			return ""
-		}
-		if i > 0 {
-			out += "\n"
-		}
-		// all tool calls are unexpected since we don't currently support registering any in the CLI
-		out += fmt.Sprintf("  Model called a non-existent function '%s()' with arguments: %s", formatValues+toolCall.Function.Name+formatExplanation, formatValues+string(argsAsJSON)+formatExplanation)
-	}
-	if !plainText {
-		out += readline.ColorDefault
-	}
-	return out
 }

@@ -24,13 +24,11 @@ import (
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/fs/gguf"
 	"github.com/ollama/ollama/manifest"
-	"github.com/ollama/ollama/model/parsers"
 	"github.com/ollama/ollama/parser"
 	"github.com/ollama/ollama/template"
 	"github.com/ollama/ollama/thinking"
 	"github.com/ollama/ollama/types/model"
 	"github.com/ollama/ollama/version"
-	"github.com/ollama/ollama/x/transfer"
 )
 
 // Blobs newer than this may belong to another process that has not written its
@@ -64,7 +62,6 @@ type Model struct {
 	Config             model.ConfigV2
 	ShortName          string
 	ModelPath          string
-	DraftPath          string
 	ParentModel        string
 	HasChatTemplate    bool
 	HasGoTemplate      bool
@@ -135,9 +132,9 @@ func (m *Model) ggufCapabilities(capabilities []model.Capability) ([]model.Capab
 	defer f.Close()
 
 	modelArch := f.KeyValue("general.architecture").String()
-	if !usesYollamaRenderedChat(m) {
-		capabilities = chatTemplateCapabilities(capabilities, f.KeyValue("tokenizer.chat_template").String())
-	}
+
+	capabilities = chatTemplateCapabilities(capabilities, f.KeyValue("tokenizer.chat_template").String())
+
 	if f.KeyValue("pooling_type").Valid() {
 		capabilities = appendCapability(capabilities, model.CapabilityEmbedding)
 	} else {
@@ -255,18 +252,6 @@ func (m *Model) templateCapabilities(capabilities []model.Capability) []model.Ca
 }
 
 func (m *Model) parserCapabilities(capabilities []model.Capability) []model.Capability {
-	builtinParser := parsers.ParserForName(m.Config.Parser)
-	if builtinParser == nil {
-		return capabilities
-	}
-
-	if builtinParser.HasToolSupport() {
-		capabilities = appendCapability(capabilities, model.CapabilityTools)
-	}
-	if builtinParser.HasThinkingSupport() {
-		capabilities = appendCapability(capabilities, model.CapabilityThinking)
-	}
-
 	return capabilities
 }
 
@@ -392,13 +377,6 @@ func (m *Model) String() string {
 		})
 	}
 
-	if m.DraftPath != "" {
-		modelfile.Commands = append(modelfile.Commands, parser.Command{
-			Name: "draft",
-			Args: m.DraftPath,
-		})
-	}
-
 	for _, projector := range m.ProjectorPaths {
 		modelfile.Commands = append(modelfile.Commands, parser.Command{
 			Name: "model",
@@ -502,12 +480,13 @@ func GetModel(name string) (*Model, error) {
 	modelHasPooling := false
 	ggufChatTemplate := ""
 	for _, layer := range mf.Layers {
+		normalizedType := NormalizeMediaType(layer.MediaType)
 		filename, err := manifest.BlobsPath(layer.Digest)
 		if err != nil {
 			return nil, err
 		}
 
-		switch layer.MediaType {
+		switch normalizedType {
 		case "application/vnd.yollama.image.model":
 			m.ModelPath = filename
 			m.ParentModel = layer.From
@@ -522,10 +501,8 @@ func GetModel(name string) (*Model, error) {
 				modelHasPooling = f.KeyValue("pooling_type").Valid()
 				f.Close()
 			}
-		case manifest.MediaTypeImageDraft:
-			m.DraftPath = filename
 		case "application/vnd.yollama.image.embed":
-			// Deprecated in versions  > 0.1.2
+			// Deprecated in versions > 0.1.2
 			// TODO: remove this warning in a future version
 			slog.Info("WARNING: model contains embeddings, but embeddings in modelfiles have been deprecated and will be ignored.")
 		case "application/vnd.yollama.image.adapter":
@@ -558,7 +535,6 @@ func GetModel(name string) (*Model, error) {
 			}
 			defer params.Close()
 
-			// parse model options parameters into a map so that we can see which fields have been specified explicitly
 			if err = json.NewDecoder(params).Decode(&m.Options); err != nil {
 				return nil, err
 			}
@@ -758,15 +734,6 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 		layers = append(layers, mf.Config)
 	}
 
-	// Use fast transfer for models with tensor layers (many small blobs)
-	if hasTensorLayers(layers) {
-		if err := pullWithTransfer(ctx, n, layers, manifestData, regOpts, fn); err != nil {
-			return err
-		}
-		fn(api.ProgressResponse{Status: "success"})
-		return nil
-	}
-
 	skipVerify := make(map[string]bool)
 	for _, layer := range layers {
 		cacheHit, err := downloadBlob(ctx, downloadOpts{
@@ -844,82 +811,6 @@ func hasTensorLayers(layers []manifest.Layer) bool {
 		}
 	}
 	return false
-}
-
-// pullWithTransfer uses the simplified x/transfer package for downloading blobs.
-func pullWithTransfer(ctx context.Context, n model.Name, layers []manifest.Layer, manifestData []byte, regOpts *registryOptions, fn func(api.ProgressResponse)) error {
-	blobs := make([]transfer.Blob, len(layers))
-	for i, layer := range layers {
-		blobs[i] = transfer.Blob{
-			Digest: layer.Digest,
-			Size:   layer.Size,
-		}
-	}
-
-	destDir, err := manifest.BlobsPath("")
-	if err != nil {
-		return err
-	}
-
-	base := n.BaseURL()
-	if base.Scheme != "http" && regOpts != nil && regOpts.Insecure {
-		base.Scheme = "http"
-	}
-	baseURL := base.String()
-
-	var totalSize int64
-	for _, blob := range blobs {
-		totalSize += blob.Size
-	}
-
-	progress := func(completed, total int64) {
-		fn(api.ProgressResponse{
-			Status:    "pulling model",
-			Digest:    "sha256:model",
-			Total:     total,
-			Completed: completed,
-		})
-	}
-
-	getToken := func(ctx context.Context, challenge transfer.AuthChallenge) (string, error) {
-		return getAuthorizationToken(ctx, registryChallenge{
-			Realm:   challenge.Realm,
-			Service: challenge.Service,
-			Scope:   challenge.Scope,
-		}, base.Host)
-	}
-
-	if err := transfer.Download(ctx, transfer.DownloadOptions{
-		Blobs:           blobs,
-		BaseURL:         baseURL,
-		DestDir:         destDir,
-		Repository:      n.DisplayNamespaceModel(),
-		BodyConcurrency: max(1, int(envconfig.MaxTransferStreams())),
-		Progress:        progress,
-		Token:           regOpts.Token,
-		GetToken:        getToken,
-		Logger:          slog.Default(),
-	}); err != nil {
-		return err
-	}
-
-	// Write manifest
-	fn(api.ProgressResponse{Status: "writing manifest"})
-
-	fp, err := manifest.PathForName(n)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(fp, manifestData, 0o644); err != nil {
-		return err
-	}
-
-	slog.Debug("manifest written", "path", fp, "sha256", fmt.Sprintf("%x", sha256.Sum256(manifestData)), "size", len(manifestData))
-	return nil
 }
 
 func pullModelManifest(ctx context.Context, n model.Name, regOpts *registryOptions) (*manifest.Manifest, []byte, error) {

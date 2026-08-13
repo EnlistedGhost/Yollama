@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/internal/orderedmap"
 	"github.com/ollama/ollama/types/model"
@@ -28,6 +26,8 @@ type StatusError struct {
 
 func (e StatusError) Error() string {
 	switch {
+	case e.Status != "" && e.ErrorMessage != "":
+		return fmt.Sprintf("%s: %s", e.Status, e.ErrorMessage)
 	case e.Status != "":
 		return e.Status
 	case e.ErrorMessage != "":
@@ -36,6 +36,19 @@ func (e StatusError) Error() string {
 		// this should not happen
 		return "something went wrong, please see the yollama server logs for details"
 	}
+}
+
+type AuthorizationError struct {
+	StatusCode int
+	Status     string
+	SigninURL  string `json:"signin_url"`
+}
+
+func (e AuthorizationError) Error() string {
+	if e.Status != "" {
+		return e.Status
+	}
+	return "something went wrong, please see the yollama server logs for details"
 }
 
 // ImageData represents the raw binary data of an image file.
@@ -304,7 +317,6 @@ func (t ToolCallFunctionArguments) MarshalJSON() ([]byte, error) {
 type Tool struct {
 	Type     string       `json:"type"`
 	Items    any          `json:"items,omitempty"`
-	Function ToolFunction `json:"function"`
 }
 
 // PropertyType can be either a string or an array of strings
@@ -469,30 +481,6 @@ func mapToTypeScriptType(jsonType string) string {
 	}
 }
 
-type ToolFunctionParameters struct {
-	Type       string             `json:"type"`
-	Defs       any                `json:"$defs,omitempty"`
-	Items      any                `json:"items,omitempty"`
-	Required   []string           `json:"required,omitempty"`
-	Properties *ToolPropertiesMap `json:"properties"`
-}
-
-func (t *ToolFunctionParameters) String() string {
-	bts, _ := json.Marshal(t)
-	return string(bts)
-}
-
-type ToolFunction struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Parameters  ToolFunctionParameters `json:"parameters"`
-}
-
-func (t *ToolFunction) String() string {
-	bts, _ := json.Marshal(t)
-	return string(bts)
-}
-
 // TokenLogprob represents log probability information for a single token alternative.
 type TokenLogprob struct {
 	// Token is the text representation of the token.
@@ -591,7 +579,6 @@ type Runner struct {
 	MainGPU         *int  `json:"main_gpu,omitempty"`
 	UseMMap         *bool `json:"use_mmap,omitempty"`
 	NumThread       int   `json:"num_thread,omitempty"`
-	DraftNumPredict int   `json:"draft_num_predict,omitempty"`
 }
 
 // EmbedRequest is the request passed to [Client.Embed].
@@ -658,9 +645,6 @@ type CreateRequest struct {
 	// Quantize is the quantization format for the model; leave blank to not change the quantization level.
 	Quantize string `json:"quantize,omitempty"`
 
-	// DraftQuantize is the quantization format for the draft model.
-	DraftQuantize string `json:"draft_quantize,omitempty"`
-
 	// From is the name of the model or file to use as the source.
 	From string `json:"from,omitempty"`
 
@@ -669,9 +653,6 @@ type CreateRequest struct {
 
 	// Files is a map of files include when creating the model.
 	Files map[string]string `json:"files,omitempty"`
-
-	// DraftFiles is a map of draft model files to include when creating the model.
-	DraftFiles map[string]string `json:"draft_files,omitempty"`
 
 	// Adapters is a map of LoRA adapters to include when creating the model.
 	Adapters map[string]string `json:"adapters,omitempty"`
@@ -859,19 +840,11 @@ type GenerateResponse struct {
 
 	Metrics
 
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-
 	DebugInfo *DebugInfo `json:"_debug_info,omitempty"`
 
 	// Logprobs contains log probability information for the generated tokens,
 	// if requested via the Logprobs parameter.
 	Logprobs []Logprob `json:"logprobs,omitempty"`
-
-	// Experimental: Image generation fields (may change or be removed)
-
-	// Image contains a base64-encoded generated image.
-	// Only present for image generation models.
-	Image string `json:"image,omitempty"`
 
 	// Completed is the number of completed steps in image generation.
 	// Only present for image generation models during streaming.
@@ -892,18 +865,6 @@ type ModelDetails struct {
 	QuantizationLevel string   `json:"quantization_level"`
 	ContextLength     int      `json:"context_length,omitempty"`
 	EmbeddingLength   int      `json:"embedding_length,omitempty"`
-}
-
-// UserResponse provides information about a user.
-type UserResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Bio       string    `json:"bio,omitempty"`
-	AvatarURL string    `json:"avatarurl,omitempty"`
-	FirstName string    `json:"firstname,omitempty"`
-	LastName  string    `json:"lastname,omitempty"`
-	Plan      string    `json:"plan,omitempty"`
 }
 
 // Tensor describes the metadata for a given tensor.
@@ -1067,10 +1028,9 @@ func DefaultOptions() Options {
 		Runner: Runner{
 			// options set when the model is loaded
 			NumCtx:          int(envconfig.ContextLength()),
-			NumBatch:        1512,
+			NumBatch:        1024,
 			NumGPU:          -1, // -1 here indicates that NumGPU should be set dynamically
 			NumThread:       0,  // let the runtime decide
-			DraftNumPredict: 0,
 			UseMMap:         nil,
 		},
 	}

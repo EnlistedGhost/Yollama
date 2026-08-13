@@ -26,7 +26,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/convert"
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/format"
 	ofs "github.com/ollama/ollama/fs"
@@ -80,21 +79,6 @@ func (s *Server) CreateHandler(c *gin.Context) {
 		}
 	}
 
-	for v, digest := range r.DraftFiles {
-		if !fs.ValidPath(v) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errFilePath.Error()})
-			return
-		}
-		if digest == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": manifest.ErrInvalidDigestFormat.Error()})
-			return
-		}
-	}
-	if r.DraftQuantize != "" && len(r.DraftFiles) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "--draft-quantize requires a DRAFT model"})
-		return
-	}
-
 	for _, digest := range r.Adapters {
 		if digest == "" {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": manifest.ErrInvalidDigestFormat.Error()})
@@ -129,25 +113,29 @@ func (s *Server) CreateHandler(c *gin.Context) {
 
 		if r.From != "" {
 			slog.Debug("create model from model name", "from", r.From)
-			fromRef := parseAndValidateModelRef(r.From)
-
-			fromName := fromRef.Name
-			remoteHost := r.RemoteHost
-			if fromRef.Source == modelSourceCloud && remoteHost == "" {
-				remoteHost = cloudProxyBaseURL
+			fromRef, err := parseAndValidateModelRef(r.From)
+			if err != nil {
+				ch <- gin.H{"error": errtypes.InvalidModelNameErrMsg, "status": http.StatusBadRequest}
+				return
 			}
 
-			if remoteHost != "" {
-				ru, err := remoteURL(remoteHost)
-				if err != nil {
-					ch <- gin.H{"error": "bad remote", "status": http.StatusBadRequest}
-					return
-				}
+			fromName := fromRef.Name
+			//remoteHost := r.RemoteHost
+			//if fromRef.Source == modelSourceCloud && remoteHost == "" {
+			//	remoteHost = cloudProxyBaseURL
+			//}
 
-				config.RemoteModel = fromRef.Base
-				config.RemoteHost = ru
-				remote = true
-			} else {
+			//if remoteHost != "" {
+			//	ru, err := remoteURL(remoteHost)
+			//	if err != nil {
+			//		ch <- gin.H{"error": "bad remote", "status": http.StatusBadRequest}
+			//		return
+			//	}
+
+				//config.RemoteModel = fromRef.Base
+				//config.RemoteHost = ru
+				//remote = true
+			//} else {
 				ctx, cancel := context.WithCancel(c.Request.Context())
 				defer cancel()
 
@@ -185,7 +173,7 @@ func (s *Server) CreateHandler(c *gin.Context) {
 						}
 					}
 				}
-			}
+			//}
 		} else if r.Files != nil {
 			baseLayers, err = convertModelFromFiles(r.Files, baseLayers, false, fn)
 			if err != nil {
@@ -201,26 +189,6 @@ func (s *Server) CreateHandler(c *gin.Context) {
 		} else {
 			ch <- gin.H{"error": errNeitherFromOrFiles.Error(), "status": http.StatusBadRequest}
 			return
-		}
-
-		if remote && len(r.DraftFiles) > 0 {
-			ch <- gin.H{"error": errRemoteDraftUnsupported.Error(), "status": http.StatusBadRequest}
-			return
-		}
-
-		var draftLayers []*layerGGML
-		if !remote && r.DraftFiles != nil {
-			draftLayers, err = convertDraftModelFromFiles(r.DraftFiles, baseLayers, fn)
-			if err != nil {
-				for _, badReq := range []error{errNoFilesProvided, errOnlyGGUFSupported, errUnknownType, errFilePath} {
-					if errors.Is(err, badReq) {
-						ch <- gin.H{"error": err.Error(), "status": http.StatusBadRequest}
-						return
-					}
-				}
-				ch <- gin.H{"error": err.Error(), "status": http.StatusBadRequest}
-				return
-			}
 		}
 
 		var adapterLayers []*layerGGML
@@ -240,9 +208,6 @@ func (s *Server) CreateHandler(c *gin.Context) {
 
 		if len(adapterLayers) > 0 {
 			baseLayers = append(baseLayers, adapterLayers...)
-		}
-		if len(draftLayers) > 0 {
-			baseLayers = append(baseLayers, draftLayers...)
 		}
 
 		// Info is not currently exposed by Modelfiles, but allows overriding various
@@ -336,10 +301,6 @@ func remoteURL(raw string) (string, error) {
 		raw = "http://" + raw
 	}
 
-	if raw == "127.0.0.1" || raw == "localhost" {
-		raw = "http://127.0.0.1:11434"
-	}
-
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", fmt.Errorf("parse error: %w", err)
@@ -371,19 +332,10 @@ func convertModelFromFiles(files map[string]string, baseLayers []*layerGGML, isA
 	return convertModelFromFilesWithMediaType(files, baseLayers, isAdapter, "", true, fn)
 }
 
-func convertDraftModelFromFiles(files map[string]string, baseLayers []*layerGGML, fn func(resp api.ProgressResponse)) ([]*layerGGML, error) {
-	return convertModelFromFilesWithMediaType(files, baseLayers, false, manifest.MediaTypeImageDraft, false, fn)
-}
-
 func convertModelFromFilesWithMediaType(files map[string]string, baseLayers []*layerGGML, isAdapter bool, mediaType string, detectTemplate bool, fn func(resp api.ProgressResponse)) ([]*layerGGML, error) {
 	switch detectModelTypeFromFiles(files) {
 	case "safetensors":
-		layers, err := convertFromSafetensors(files, baseLayers, isAdapter, mediaType, detectTemplate, fn)
-		if err != nil {
-			slog.Error("error converting from safetensors", "error", err)
-			return nil, err
-		}
-		return layers, nil
+		return nil, nil
 	case "gguf":
 		if len(files) == 0 {
 			return nil, errNoFilesProvided
@@ -474,150 +426,6 @@ func detectModelTypeFromFiles(files map[string]string) string {
 	return ""
 }
 
-func convertFromSafetensors(files map[string]string, baseLayers []*layerGGML, isAdapter bool, mediaType string, detectTemplate bool, fn func(resp api.ProgressResponse)) ([]*layerGGML, error) {
-	tmpDir, err := os.MkdirTemp(envconfig.Models(), "yollama-safetensors")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(tmpDir)
-	// Set up a root to validate paths
-	root, err := os.OpenRoot(tmpDir)
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-
-	for fp, digest := range files {
-		if !fs.ValidPath(fp) {
-			return nil, fmt.Errorf("%w: %s", errFilePath, fp)
-		}
-		if _, err := root.Stat(fp); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			// Path is likely outside the root
-			return nil, fmt.Errorf("%w: %s: %s", errFilePath, err, fp)
-		}
-
-		blobPath, err := manifest.BlobsPath(digest)
-		if err != nil {
-			return nil, err
-		}
-		if err := createLink(blobPath, filepath.Join(tmpDir, fp)); err != nil {
-			return nil, err
-		}
-	}
-
-	t, err := os.CreateTemp(tmpDir, "fp16")
-	if err != nil {
-		return nil, err
-	}
-	defer t.Close()
-
-	var projFile *os.File
-	if !isAdapter {
-		projFile, err = os.CreateTemp(tmpDir, "projector")
-		if err != nil {
-			return nil, err
-		}
-		defer projFile.Close()
-	}
-
-	if !isAdapter {
-		fn(api.ProgressResponse{Status: "converting model"})
-		mediaType = cmp.Or(mediaType, "application/vnd.yollama.image.model")
-		if mediaType == manifest.MediaTypeImageDraft {
-			if err := convertMTPDraftFromSafetensors(os.DirFS(tmpDir), t, baseLayers); err != nil {
-				return nil, err
-			}
-		} else {
-			if err := convert.ConvertModel(os.DirFS(tmpDir), t, projFile); err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		kv, err := kvFromLayers(baseLayers)
-		if err != nil {
-			return nil, err
-		}
-		fn(api.ProgressResponse{Status: "converting adapter"})
-		mediaType = "application/vnd.yollama.image.adapter"
-		if err := convert.ConvertAdapter(os.DirFS(tmpDir), t, kv); err != nil {
-			return nil, err
-		}
-	}
-
-	if _, err := t.Seek(0, io.SeekStart); err != nil {
-		return nil, err
-	}
-
-	layer, err := manifest.NewLayer(t, mediaType)
-	if err != nil {
-		return nil, err
-	}
-
-	bin, err := layer.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer bin.Close()
-
-	f, err := ggml.Decode(bin, -1)
-	if err != nil {
-		return nil, err
-	}
-	layers := []*layerGGML{{Layer: layer, GGML: f, rewriteForCreate: true}}
-
-	if !isAdapter {
-		projSize, err := projFile.Seek(0, io.SeekEnd)
-		if err != nil {
-			return nil, err
-		}
-		if projSize > 0 {
-			if _, err := projFile.Seek(0, io.SeekStart); err != nil {
-				return nil, err
-			}
-			projLayer, err := manifest.NewLayer(projFile, "application/vnd.yollama.image.projector")
-			if err != nil {
-				return nil, err
-			}
-			projBin, err := projLayer.Open()
-			if err != nil {
-				return nil, err
-			}
-			defer projBin.Close()
-			projGGML, err := ggml.Decode(projBin, -1)
-			if err != nil {
-				return nil, err
-			}
-			projectorLayer := &layerGGML{Layer: projLayer, GGML: projGGML, rewriteForCreate: true}
-			if needsDefaultLlavaProjectorType(projGGML) {
-				projectorLayer, err = addDefaultLlavaProjectorType(projectorLayer)
-				if err != nil {
-					return nil, err
-				}
-			}
-			layers = append(layers, projectorLayer)
-		}
-		if detectTemplate {
-			return detectChatTemplate(layers)
-		}
-	}
-	return layers, nil
-}
-
-func convertMTPDraftFromSafetensors(fsys fs.FS, out *os.File, baseLayers []*layerGGML) error {
-	baseLayer, err := baseModelLayer(baseLayers)
-	if err != nil {
-		return err
-	}
-
-	tensors, cleanup, err := baseLayerTensors(baseLayer)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	return convert.ConvertQwen35MTPDraft(fsys, out, baseLayer.GGML.KV(), tensors)
-}
-
 func baseLayerTensors(layer *layerGGML) ([]*ggml.Tensor, func(), error) {
 	if len(layer.splitParts) == 0 {
 		blobPath, err := manifest.BlobsPath(layer.Digest)
@@ -699,8 +507,6 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 			quantType := ""
 			if layer.MediaType == "application/vnd.yollama.image.model" {
 				quantType = strings.ToUpper(cmp.Or(r.Quantize, r.Quantization))
-			} else if layer.MediaType == manifest.MediaTypeImageDraft {
-				quantType = strings.ToUpper(r.DraftQuantize)
 			}
 			ft := layer.GGML.KV().FileType()
 			rewroteLayer := false
@@ -713,9 +519,7 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 					return err
 				}
 
-				if layer.MediaType == manifest.MediaTypeImageDraft && ft.ToTensorType().IsQuantized() {
-					return fmt.Errorf("draft quantization requires an unquantized draft model, got %s", ft)
-				} else if !slices.Contains([]string{"F16", "BF16", "F32"}, ft.String()) {
+				if !slices.Contains([]string{"F16", "BF16", "F32"}, ft.String()) {
 					return errors.New("quantization is only supported for F16, BF16 and F32 models")
 				} else if ft != want {
 					layer, err = quantizeLayer(layer, quantType, fn)
@@ -732,13 +536,7 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 					return err
 				}
 			}
-			if !rewroteLayer && layer.rewriteForCreate && layer.GGML.Name() == "gguf" && layer.MediaType == manifest.MediaTypeImageDraft && len(layer.splitParts) > 0 {
-				var err error
-				layer, err = copyLayerWithLlamaQuantize(layer, fn)
-				if err != nil {
-					return err
-				}
-			}
+
 			if layer.rewriteForCreate && layer.GGML.Name() == "gguf" && layer.MediaType == "application/vnd.yollama.image.projector" && needsDefaultLlavaProjectorType(layer.GGML) {
 				var err error
 				fn(api.ProgressResponse{Status: "updating GGUF projector metadata"})
@@ -777,11 +575,6 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 						config.Renderer = cmp.Or(config.Renderer, "nemotron-3-nano")
 						config.Parser = cmp.Or(config.Parser, "nemotron-3-nano")
 					}
-				}
-			case manifest.MediaTypeImageDraft:
-				config.Draft = &model.Draft{
-					ModelFormat:  layer.GGML.Name(),
-					Architecture: layer.GGML.KV().Architecture(),
 				}
 			}
 		}
@@ -904,7 +697,7 @@ func quantizeLayer(layer *layerGGML, quantizeType string, fn func(resp api.Progr
 
 func copyLayerWithLlamaQuantize(layer *layerGGML, fn func(resp api.ProgressResponse)) (*layerGGML, error) {
 	// NOTE: For now, we bypass verification of layers and copy of new layers... 
-	// it's horribly slow and serves no purpose if the model is valid GGUF
+	// it's horribly slow and serves not purpose if the model is valid GGUF
 	//
 	//newLayer, err := rewriteLayerWithLlamaQuantize(layer, "COPY", fn, func(in, out *os.File, progressFn func(uint64)) error {
 	//	return copyGGUFWithLlamaQuantize(in, out, layer.GGML, progressFn)

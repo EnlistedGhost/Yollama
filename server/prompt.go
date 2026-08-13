@@ -5,13 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strings"
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/llm"
-	"github.com/ollama/ollama/model/renderers"
 	"github.com/ollama/ollama/template"
 )
 
@@ -20,63 +18,9 @@ type tokenizeFunc func(context.Context, string) ([]int, error)
 // chatPrompt accepts a list of messages and returns the prompt and media that should be used for the next chat turn.
 // chatPrompt truncates any messages that exceed the context window of the model, making sure to always include 1) the
 // latest message and 2) system messages
-func chatPrompt(ctx context.Context, m *Model, tokenize tokenizeFunc, opts *api.Options, msgs []api.Message, tools []api.Tool, think *api.ThinkValue, truncate bool) (prompt string, media []llm.MediaData, _ error) {
+func chatPrompt(ctx context.Context, m *Model, tokenize tokenizeFunc, opts *api.Options, msgs []api.Message, think *api.ThinkValue) (prompt string, media []llm.MediaData, _ error) {
 	var system []api.Message
-
-	// TODO: This is only a truncation heuristic; llama-server handles the
-	// actual image/media inputs. Replace this with projector/model-aware media
-	// token accounting so image history is neither over-packed nor over-trimmed.
-	// Clip images are represented as 768 tokens, each an embedding.
-	imageNumTokens := 768
-
-	lastMsgIdx := len(msgs) - 1
 	currMsgIdx := 0
-
-	if truncate {
-		// Start with all messages and remove from the front until it fits in context
-		for i := 0; i <= lastMsgIdx; i++ {
-			// Collect system messages from the portion we're about to skip
-			system = make([]api.Message, 0)
-			for j := range i {
-				if msgs[j].Role == "system" {
-					system = append(system, msgs[j])
-				}
-			}
-
-			p, err := renderPrompt(m, append(system, msgs[i:]...), tools, think)
-			if err != nil {
-				return "", nil, err
-			}
-
-			s, err := tokenize(ctx, p)
-			if err != nil {
-				return "", nil, err
-			}
-
-			ctxLen := len(s)
-			if m.ProjectorPaths != nil {
-				for _, msg := range msgs[i:] {
-					ctxLen += imageNumTokens * len(msg.Images)
-				}
-			}
-
-			if ctxLen <= opts.NumCtx {
-				currMsgIdx = i
-				break
-			}
-
-			// Must always include at least the last message
-			if i == lastMsgIdx {
-				currMsgIdx = lastMsgIdx
-				break
-			}
-		}
-	}
-
-	if currMsgIdx > 0 {
-		slog.Debug("truncating input messages which exceed context length", "truncated", len(msgs[currMsgIdx:]))
-	}
-
 	renderMsgs := slices.Clone(msgs)
 
 	for cnt, msg := range renderMsgs[currMsgIdx:] {
@@ -113,7 +57,7 @@ func chatPrompt(ctx context.Context, m *Model, tokenize tokenizeFunc, opts *api.
 	}
 
 	// truncate any messages that do not fit into the context window
-	p, err := renderPrompt(m, append(system, renderMsgs[currMsgIdx:]...), tools, think)
+	p, err := renderPrompt(m, append(system, renderMsgs[currMsgIdx:]...), think)
 	if err != nil {
 		return "", nil, err
 	}
@@ -121,16 +65,7 @@ func chatPrompt(ctx context.Context, m *Model, tokenize tokenizeFunc, opts *api.
 	return p, media, nil
 }
 
-func renderPrompt(m *Model, msgs []api.Message, tools []api.Tool, think *api.ThinkValue) (string, error) {
-	if m.Config.Renderer != "" {
-		rendererName := resolveRendererName(m)
-		rendered, err := renderers.RenderWithRenderer(rendererName, msgs, tools, think)
-		if err != nil {
-			return "", err
-		}
-		return rendered, nil
-	}
-
+func renderPrompt(m *Model, msgs []api.Message, think *api.ThinkValue) (string, error) {
 	var b bytes.Buffer
 	thinkVal := false
 	thinkLevel := ""
@@ -138,7 +73,7 @@ func renderPrompt(m *Model, msgs []api.Message, tools []api.Tool, think *api.Thi
 		thinkVal = think.Bool()
 		thinkLevel = think.String()
 	}
-	if err := m.Template.Execute(&b, template.Values{Messages: msgs, Tools: tools, Think: thinkVal, ThinkLevel: thinkLevel, IsThinkSet: think != nil}); err != nil {
+	if err := m.Template.Execute(&b, template.Values{Messages: msgs, Think: thinkVal, ThinkLevel: thinkLevel, IsThinkSet: think != nil}); err != nil {
 		return "", err
 	}
 	return b.String(), nil

@@ -15,4 +15,4 @@ go build -o yollama .
 
 ---- or ----
 
-cd ~/Builds/yollama-SRC-0.30.0-rc29/; export PATH=$PATH:/usr/local/cuda/bin; export PATH=~/Builds/go-1.24.13-toolchain/go/bin/:$PATH; export MAKEFLAGS="-j16 -fno-aggressive-loop-optimizations"; export GOMAXPROCS=2; go clean -cache; go generate ./...; go build -o yollama_0_32_5_xc44-linux-amd64 .
+cd ~/Builds/yollama-SRC-0.30.0-rc29/; export PATH=$PATH:/usr/local/cuda/bin; export PATH=~/Builds/go-1.24.13-toolchain/go/bin/:$PATH; export MAKEFLAGS="-j28 -fno-aggressive-loop-optimizations"; export GOMAXPROCS=8; go clean -cache; go generate ./...; go build -o yollama .

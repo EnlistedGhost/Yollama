@@ -24,8 +24,6 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
-	"strconv"
-	"time"
 
 	"github.com/ollama/ollama/auth"
 	"github.com/ollama/ollama/envconfig"
@@ -41,7 +39,25 @@ type Client struct {
 }
 
 func checkError(resp *http.Response, body []byte) error {
-	return nil
+	if resp.StatusCode < http.StatusBadRequest {
+		return nil
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		authError := AuthorizationError{StatusCode: resp.StatusCode}
+		json.Unmarshal(body, &authError)
+		return authError
+	}
+
+	apiError := StatusError{StatusCode: resp.StatusCode}
+
+	err := json.Unmarshal(body, &apiError)
+	if err != nil {
+		// Use the full body as the message if we fail to decode a response.
+		apiError.ErrorMessage = string(body)
+	}
+
+	return apiError
 }
 
 // ClientFromEnvironment creates a new [Client] using configuration from the
@@ -98,19 +114,6 @@ func (c *Client) do(ctx context.Context, method, path string, reqData, respData 
 	requestURL := c.base.JoinPath(path)
 
 	var token string
-	if envconfig.UseAuth() || c.base.Hostname() == "127.0.0.1" {
-		now := strconv.FormatInt(time.Now().Unix(), 10)
-		chal := fmt.Sprintf("%s,%s?ts=%s", method, path, now)
-		token, err = getAuthorizationToken(ctx, chal)
-		if err != nil {
-			return err
-		}
-
-		q := requestURL.Query()
-		q.Set("ts", now)
-		requestURL.RawQuery = q.Encode()
-	}
-
 	request, err := http.NewRequestWithContext(ctx, method, requestURL.String(), reqBody)
 	if err != nil {
 		return err
@@ -163,20 +166,6 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 	requestURL := c.base.JoinPath(path)
 
 	var token string
-	if envconfig.UseAuth() || c.base.Hostname() == "127.0.0.1" {
-		var err error
-		now := strconv.FormatInt(time.Now().Unix(), 10)
-		chal := fmt.Sprintf("%s,%s?ts=%s", method, path, now)
-		token, err = getAuthorizationToken(ctx, chal)
-		if err != nil {
-			return err
-		}
-
-		q := requestURL.Query()
-		q.Set("ts", now)
-		requestURL.RawQuery = q.Encode()
-	}
-
 	request, err := http.NewRequestWithContext(ctx, method, requestURL.String(), buf)
 	if err != nil {
 		return err
@@ -408,12 +397,4 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	}
 
 	return version.Version, nil
-}
-
-func (c *Client) Whoami(ctx context.Context) (*UserResponse, error) {
-	var resp UserResponse
-	if err := c.do(ctx, http.MethodPost, "/api/me", nil, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
 }
