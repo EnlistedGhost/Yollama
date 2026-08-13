@@ -1,6 +1,6 @@
 <p align="center">
   <a href="[Yollama](https://github.com/EnlistedGhost/Yollama)">
-    <img src="https://github.com/Yollama/" alt="Yollama" width="256"/>
+    <img src="https://github.com/EnlistedGhost/Yollama/" alt="Yollama" width="256"/>
   </a>
 </p>
 
