@@ -1,337 +1,83 @@
-name: Release
+name: Build and Release Yollama
 
 on:
-  workflow_dispatch: # allows manual triggering
-    inputs:
-      create_release:
-        description: 'Create new release'
-        required: true
-        type: boolean
   push:
-    branches:
-      - master
-    paths: [
-      '.github/workflows/release.yml',
-      '**/CMakeLists.txt',
-      '**/.cmake',
-      '**/*.h',
-      '**/*.hpp',
-      '**/*.c',
-      '**/*.cpp',
-      '**/*.cu',
-      '**/*.cuh',
-      '**/*.swift',
-      '**/*.m',
-      '**/*.metal',
-      '**/*.comp',
-      '**/*.glsl'
-    ]
-env:
-  CGO_CFLAGS: '-O3'
-  CGO_CXXFLAGS: '-O3'
+    branches: [ master ]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [ master ]
 
 jobs:
-  setup-environment:
+  build-and-release:
     runs-on: ubuntu-latest
-    environment: release
-    outputs:
-      GOFLAGS: ${{ steps.goflags.outputs.GOFLAGS }}
-      VERSION: ${{ steps.goflags.outputs.VERSION }}
-      vendorsha: ${{ steps.goflags.outputs.vendorsha }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set environment
-        id: goflags
-        run: |
-          echo GOFLAGS="'-ldflags=-w -s \"-X=github.com/EnlistedGhost/Yollama/version.Version=${GITHUB_REF_NAME#v}\" \"-X=github.com/EnlistedGhost/Yollama/server.mode=release\"'" | tee -a $GITHUB_OUTPUT
-          echo VERSION="${GITHUB_REF_NAME#v}" | tee -a $GITHUB_OUTPUT
-          echo vendorsha=$(cat LLAMA_CPP_VERSION) | tee -a $GITHUB_OUTPUT
-  linux-depends:
-    strategy:
-      matrix:
-        include:
-          - arch: amd64
-            target: llama-server-cpu
-          - arch: amd64
-            target: llama-server-cuda_v12
-    runs-on: ${{ matrix.arch == 'amd64' && 'linux-amd64' || 'linux' }}
-    environment: release
-    needs: setup-environment
-    env:
-      GOFLAGS: ${{ needs.setup-environment.outputs.GOFLAGS }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/${{ matrix.arch }}
-          target: ${{ matrix.target }}
-          provenance: false
-          sbom: false
-          build-args: |
-            GOFLAGS=${{ env.GOFLAGS }}
-            CGO_CFLAGS=${{ env.CGO_CFLAGS }}
-            CGO_CXXFLAGS=${{ env.CGO_CXXFLAGS }}
-            APT_MIRROR=http://azure.archive.ubuntu.com/ubuntu
-            APT_PORTS_MIRROR=http://azure.ports.ubuntu.com/ubuntu-ports
-          cache-from: |
-            type=registry,ref=yollama/release:cache-${{ matrix.arch }}-${{ matrix.target }}
-            type=registry,ref=${{ vars.DOCKER_REPO }}:latest
-          cache-to: type=registry,ref=yollama/release:cache-${{ matrix.arch }}-${{ matrix.target }},mode=max
 
-  # Build each Docker variant (OS, arch, and flavor) separately. Using QEMU is unreliable and slower.
-  # Heavy stages were pre-built by linux-depends; this job is cache-hit-only for those layers
-  # and just assembles, runs the Go build, pushes the final image, and extracts release bundles.
-  docker-build-push:
-    strategy:
-      matrix:
-        include:
-          - os: linux
-            arch: amd64
-            archive-target: archive
-            build-args: |
-              CGO_CFLAGS
-              CGO_CXXFLAGS
-              GOFLAGS
-              APT_MIRROR=http://azure.archive.ubuntu.com/ubuntu
-              APT_PORTS_MIRROR=http://azure.ports.ubuntu.com/ubuntu-ports
-              YOLLAMA_MLX_BUILD_JOBS=16
-              YOLLAMA_MLX_NVCC_THREADS=6
-            cache-from: |
-              type=registry,ref=yollama/release:cache-amd64-llama-server-cpu
-              type=registry,ref=yollama/release:cache-amd64-llama-server-cuda_v12
-              type=registry,ref=${{ vars.DOCKER_REPO }}:latest
-          - os: linux
-            arch: amd64
-            archive-target: archive
-            build-args: |
-              CGO_CFLAGS
-              CGO_CXXFLAGS
-              GOFLAGS
-              APT_MIRROR=http://azure.archive.ubuntu.com/ubuntu
-              APT_PORTS_MIRROR=http://azure.ports.ubuntu.com/ubuntu-ports
-              YOLLAMA_MLX_BUILD_JOBS=16
-              YOLLAMA_MLX_NVCC_THREADS=6
-            cache-from: |
-              type=registry,ref=yollama/release:cache-amd64-llama-server-cpu
-              type=registry,ref=yollama/release:cache-amd64-llama-server-cuda_v12
-              type=registry,ref=${{ vars.DOCKER_REPO }}:latest
-          - os: linux
-            arch: amd64
-            suffix: '-cuda'
-            archive-target: image-archive
-            build-args: |
-              CGO_CFLAGS
-              CGO_CXXFLAGS
-              GOFLAGS
-              FLAVOR=cuda
-              APT_MIRROR=http://azure.archive.ubuntu.com/ubuntu
-              APT_PORTS_MIRROR=http://azure.ports.ubuntu.com/ubuntu-ports
-              YOLLAMA_MLX_BUILD_JOBS=16
-              YOLLAMA_MLX_NVCC_THREADS=6
-            cache-from: |
-              type=registry,ref=yollama/release:cache-amd64-llama-server-cpu
-              type=registry,ref=yollama/release:cache-amd64-llama-server-cuda_v12
-              type=registry,ref=${{ vars.DOCKER_REPO }}:latest
-    runs-on: ${{ matrix.arch == 'amd64' && format('{0}-{1}', matrix.os, matrix.arch) || matrix.os }}
-    environment: release
-    needs: [setup-environment, linux-depends]
-    env:
-      GOFLAGS: ${{ needs.setup-environment.outputs.GOFLAGS }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
-      - id: build-push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: ${{ matrix.os }}/${{ matrix.arch }}
-          provenance: false
-          sbom: false
-          build-args: ${{ matrix.build-args }}
-          outputs: type=image,name=${{ vars.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: ${{ matrix.cache-from }}
-          cache-to: type=inline
-      - run: |
-          mkdir -p ${{ matrix.os }}-${{ matrix.arch }}
-          echo "${{ steps.build-push.outputs.digest }}" >${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.suffix }}.txt
-        working-directory: ${{ runner.temp }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.suffix }}
-          path: |
-            ${{ runner.temp }}/${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.suffix }}.txt
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: ${{ matrix.os }}/${{ matrix.arch }}
-          target: ${{ matrix.archive-target }}
-          provenance: false
-          sbom: false
-          build-args: ${{ matrix.build-args }}
-          outputs: type=local,dest=dist/${{ matrix.os }}-${{ matrix.arch }}
-          cache-from: ${{ matrix.cache-from }}
-      - name: Deduplicate CUDA libraries
-        run: |
-          ./scripts/deduplicate_cuda_libs.sh dist/${{ matrix.os }}-${{ matrix.arch }}
-      - name: Verify Linux build payloads
-        shell: bash
-        run: |
-          set -euo pipefail
-          base="dist/${{ matrix.os }}-${{ matrix.arch }}"
-          for payload in \
-            "$base/bin/yollama" \
-            "$base/lib/yollama/llama-server"
-          do
-            [ -f "$payload" ] || { echo "missing $payload"; exit 1; }
-          done
-      - run: |
-          for COMPONENT in bin/* lib/yollama/*; do
-            case "$COMPONENT" in
-              bin/yollama*)               echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/yollama/*.so*)          echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/yollama/cuda_v*)        echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/yollama/include*)       echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}-mlx.tar.in ;;
-            esac
-          done
-        working-directory: dist/${{ matrix.os }}-${{ matrix.arch }}
-      - if: matrix.suffix == '-cuda'
-        run: rm -f dist/${{ matrix.os }}-${{ matrix.arch }}/yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in
-      - run: |
-          echo "Manifests"
-          for ARCHIVE in dist/${{ matrix.os }}-${{ matrix.arch }}/*.tar.in ; do
-            echo $ARCHIVE
-            cat $ARCHIVE
-          done
-      - run: |
-          for ARCHIVE in dist/${{ matrix.os }}-${{ matrix.arch }}/*.tar.in; do
-            tar c -C dist/${{ matrix.os }}-${{ matrix.arch }} -T $ARCHIVE --owner 0 --group 0 | zstd -19 -T0 >$(basename ${ARCHIVE//.*/}.tar.zst) &
-          done
-          wait
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bundles-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.suffix }}
-          path: |
-            *.tar.zst
-
-  # Merge Docker images for the same flavor into a single multi-arch manifest
-  docker-merge-push:
-    strategy:
-      matrix:
-        suffix: ['', '-cuda']
-    runs-on: linux
-    environment: release
-    needs: [docker-build-push]
-    steps:
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
-      - id: metadata
-        uses: docker/metadata-action@v4
-        with:
-          flavor: |
-            latest=false
-            suffix=${{ matrix.suffix }}
-          images: |
-            ${{ vars.DOCKER_REPO }}
-          tags: |
-            type=ref,enable=true,priority=600,prefix=pr-,event=pr
-            type=semver,pattern={{version}}
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: digest-*
-          path: ${{ runner.temp }}
-          merge-multiple: true
-      - run: |
-          docker buildx imagetools create $(echo '${{ steps.metadata.outputs.json }}' | jq -cr '.tags | map("-t", .) | join(" ")') $(cat *-${{ matrix.suffix }}.txt | xargs printf '${{ vars.DOCKER_REPO }}@%s ')
-          docker buildx imagetools inspect ${{ vars.DOCKER_REPO }}:${{ steps.metadata.outputs.version }}
-        working-directory: ${{ runner.temp }}
-
-  # Final release process
-  release:
-    runs-on: ubuntu-latest
-    environment: release
-    needs: [docker-build-push]
     permissions:
       contents: write
+
     env:
-      GH_TOKEN: ${{ github.token }}
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: 1
+      MAKEFLAGS: "-j10 -fno-aggressive-loop-optimizations"
+      GOMAXPROCS: 8
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: bundles-*
-          path: dist
-          merge-multiple: true
-      - name: Log dist contents
-        run: |
-          ls -l dist/
-      - name: Copy install scripts to dist
-        run: |
-          cp scripts/install.sh dist/install.sh
-      - name: Verify release artifacts
-        run: |
-          required=(
-            dist/YollamaSetup.exe
-            dist/install.ps1
-            dist/install.sh
-            dist/yollama-windows-amd64.zip
-            dist/yollama-windows-arm64.zip
-          )
-          for payload in "${required[@]}"; do
-            if [ ! -f "$payload" ]; then
-              echo "::error::Missing expected release artifact: $payload"
-              exit 1
-            fi
-          done
-      - name: Generate checksum file
-        run: find . -type f -not -name 'sha256sum.txt' | xargs sha256sum | tee sha256sum.txt
-        working-directory: dist
-      - name: Create or update Release for tag
-        run: |
-          RELEASE_VERSION="$(echo ${GITHUB_REF_NAME} | cut -f1 -d-)"
-          echo "Looking for existing release for ${RELEASE_VERSION}"
-          OLD_TAG=$(gh release ls --json name,tagName | jq -r ".[] | select(.name == \"${RELEASE_VERSION}\") | .tagName")
-          if [ -n "$OLD_TAG" ]; then
-            echo "Updating release ${RELEASE_VERSION} to point to new tag ${GITHUB_REF_NAME}"
-            gh release edit ${OLD_TAG} --tag ${GITHUB_REF_NAME}
-          else
-            echo "Creating new release ${RELEASE_VERSION} pointing to tag ${GITHUB_REF_NAME}"
-            gh release create ${GITHUB_REF_NAME} \
-              --title ${RELEASE_VERSION} \
-              --draft \
-              --generate-notes \
-              --prerelease
-          fi
-      - name: Upload release artifacts
-        run: |
-          pids=()
-          for payload in dist/*.txt dist/*.zip dist/*.tgz dist/*.tar.zst dist/*.exe dist/*.dmg dist/*.ps1 dist/*.sh ; do
-            echo "Uploading $payload"
-            gh release upload ${GITHUB_REF_NAME} $payload --clobber &
-            pids+=($!)
-            sleep 1
-          done
-          echo "Waiting for uploads to complete"
-          failed=0
-          for pid in "${pids[@]}"; do
-            if ! wait $pid; then
-              echo "::error::Upload failed (pid $pid)"
-              failed=1
-            fi
-          done
-          if [ $failed -ne 0 ]; then
-            echo "One or more uploads failed"
-            exit 1
-          fi
-          echo "done"
+    - name: Checkout repository code
+      uses: actions/checkout@v4
+
+    # 1. Fetch your pre-compiled dynamic llama.cpp backend assets from your asset release
+    - name: Download Llama.cpp Runtimes from Release
+      uses: robinraju/release-downloader@v1
+      with:
+        repository: "EnlistedGhost/Yollama"
+        tag: "b9840_amd64_linux"
+        fileName: "yollama-b9840-lib.tar.gz"
+        out-file-path: "lib"
+
+    # 2. Extract the backend assets into the 'lib' directory
+    - name: Unpack Backend Assets
+      run: |
+        cd lib
+        tar -xzf yollama-b9840-lib.tar.gz || true
+        rm -f yollama-b9840-lib.tar.gz
+
+    - name: Set up Go 1.26.x Toolchain
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26.x'
+        cache: true
+
+    - name: Execute Build Sequence
+      run: |
+        go clean -cache
+        go generate ./...
+        go build -v -trimpath -o yollama .
+
+    # 3. Package the binary, the 'lib' folder, and your interactive install.sh together
+    - name: Package Full Bundle into Tarball
+      run: |
+        mkdir -p package/lib
+        cp yollama package/
+        cp install.sh package/
+        cp -P lib/*.so* package/lib/ || true
+        cp lib/llama-server package/lib/ || true
+        cp lib/llama-quantize package/lib/ || true
+        
+        mkdir -p dist
+        tar -czf dist/yollama-linux-amd64.tar.gz -C package .
+
+    - name: Upload Workflow Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: yollama-full-bundle
+        path: dist/yollama-full-linux-amd64.tar.gz
+
+    - name: Publish GitHub Release on Tag Push
+      uses: softprops/action-gh-release@v3
+      if: startsWith(github.ref, 'refs/tags/v')
+      with:
+        files: dist/yollama-full-linux-amd64.tar.gz
+        generate_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
