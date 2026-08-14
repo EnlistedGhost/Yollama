@@ -89,7 +89,7 @@ jobs:
       matrix:
         include:
           - os: linux
-            arch: arm64
+            arch: amd64
             archive-target: archive
             build-args: |
               CGO_CFLAGS
@@ -100,11 +100,8 @@ jobs:
               YOLLAMA_MLX_BUILD_JOBS=16
               YOLLAMA_MLX_NVCC_THREADS=6
             cache-from: |
-              type=registry,ref=yollama/release:cache-arm64-llama-server-cpu
-              type=registry,ref=yollama/release:cache-arm64-llama-server-cuda_v12
-              type=registry,ref=yollama/release:cache-arm64-llama-server-cuda_v13
-              type=registry,ref=yollama/release:cache-arm64-jetpack-5
-              type=registry,ref=yollama/release:cache-arm64-jetpack-6
+              type=registry,ref=yollama/release:cache-amd64-llama-server-cpu
+              type=registry,ref=yollama/release:cache-amd64-llama-server-cuda_v12
               type=registry,ref=${{ vars.DOCKER_REPO }}:latest
           - os: linux
             arch: amd64
@@ -123,7 +120,7 @@ jobs:
               type=registry,ref=${{ vars.DOCKER_REPO }}:latest
           - os: linux
             arch: amd64
-            suffix: '-rocm'
+            suffix: '-cuda'
             archive-target: image-archive
             build-args: |
               CGO_CFLAGS
@@ -136,7 +133,7 @@ jobs:
               YOLLAMA_MLX_NVCC_THREADS=6
             cache-from: |
               type=registry,ref=yollama/release:cache-amd64-llama-server-cpu
-              type=registry,ref=yollama/release:cache-amd64-llama-server-rocm_v7_2
+              type=registry,ref=yollama/release:cache-amd64-llama-server-cuda_v12
               type=registry,ref=${{ vars.DOCKER_REPO }}:latest
     runs-on: ${{ matrix.arch == 'amd64' && format('{0}-{1}', matrix.os, matrix.arch) || matrix.os }}
     environment: release
@@ -199,18 +196,12 @@ jobs:
             case "$COMPONENT" in
               bin/yollama*)               echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
               lib/yollama/*.so*)          echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/yollama/llama-server*|lib/yollama/llama-quantize*)  echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
               lib/yollama/cuda_v*)        echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/yollama/vulkan*)        echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in ;;
-              lib/yollama/mlx*)           echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}-mlx.tar.in ;;
               lib/yollama/include*)       echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}-mlx.tar.in ;;
-              lib/yollama/cuda_jetpack5)  echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}-jetpack5.tar.in ;;
-              lib/yollama/cuda_jetpack6)  echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}-jetpack6.tar.in ;;
-              lib/yollama/rocm_v*)        echo $COMPONENT >>yollama-${{ matrix.os }}-${{ matrix.arch }}-rocm.tar.in ;;
             esac
           done
         working-directory: dist/${{ matrix.os }}-${{ matrix.arch }}
-      - if: matrix.suffix == '-rocm'
+      - if: matrix.suffix == '-cuda'
         run: rm -f dist/${{ matrix.os }}-${{ matrix.arch }}/yollama-${{ matrix.os }}-${{ matrix.arch }}.tar.in
       - run: |
           echo "Manifests"
@@ -233,7 +224,7 @@ jobs:
   docker-merge-push:
     strategy:
       matrix:
-        suffix: ['', '-rocm']
+        suffix: ['', '-cuda']
     runs-on: linux
     environment: release
     needs: [docker-build-push]
@@ -267,7 +258,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     environment: release
-    needs: [darwin-build, windows-app, docker-build-push]
+    needs: [docker-build-push]
     permissions:
       contents: write
     env:
