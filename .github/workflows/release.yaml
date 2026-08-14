@@ -54,24 +54,6 @@ jobs:
             target: llama-server-cpu
           - arch: amd64
             target: llama-server-cuda_v12
-          - arch: amd64
-            target: llama-server-cuda_v13
-          - arch: amd64
-            target: mlx
-          - arch: amd64
-            target: llama-server-rocm_v7_2
-          - arch: amd64
-            target: llama-server-vulkan
-          - arch: arm64
-            target: llama-server-cpu
-          - arch: arm64
-            target: llama-server-cuda_v12
-          - arch: arm64
-            target: llama-server-cuda_v13
-          - arch: arm64
-            target: jetpack-5
-          - arch: arm64
-            target: jetpack-6
     runs-on: ${{ matrix.arch == 'amd64' && 'linux-amd64' || 'linux' }}
     environment: release
     needs: setup-environment
