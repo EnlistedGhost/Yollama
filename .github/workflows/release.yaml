@@ -38,9 +38,11 @@ jobs:
     # 2. Extract backend assets into 'lib' directory
     - name: Unpack Backend Assets
       run: |
+        mkdir -p lib
         cd lib
         tar -xzf yollama-b9840-lib.tar.gz || true
         rm -f yollama-b9840-lib.tar.gz
+        cd ../
 
     - name: Set up Go 1.26.x Toolchain
       uses: actions/setup-go@v5
@@ -57,27 +59,28 @@ jobs:
     # 3. Package binary, 'lib' folder, and interactive setup_yollama.sh script
     - name: Package Full Bundle into Tarball
       run: |
+        mkdir -p dist
+        mkdir -p package
         mkdir -p package/lib
         cp yollama package/
         cp setup_yollama.sh package/
         cp -P lib/*.so* package/lib/ || true
         cp lib/llama-server package/lib/ || true
         cp lib/llama-quantize package/lib/ || true
-        
-        mkdir -p dist
-        tar -czf dist/yollama-linux-amd64.tar.gz -C package .
+        tar -czf yollama-linux-amd64.tar.gz package/
+        mv yollama-linux-amd64.tar.gz dist/yollama-linux-amd64.tar.gz
 
     - name: Upload Workflow Artifact
       uses: actions/upload-artifact@v4
       with:
         name: yollama-full-bundle
-        path: dist/yollama-full-linux-amd64.tar.gz
+        path: dist/yollama-linux-amd64.tar.gz
 
     - name: Publish GitHub Release on Tag Push
       uses: softprops/action-gh-release@v3
       if: startsWith(github.ref, 'refs/tags/v')
       with:
-        files: dist/yollama-full-linux-amd64.tar.gz
+        files: dist/yollama-linux-amd64.tar.gz
         generate_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
