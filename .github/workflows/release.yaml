@@ -26,7 +26,7 @@ jobs:
     - name: Checkout repository code
       uses: actions/checkout@v4
 
-    # 1. Fetch your pre-compiled dynamic llama.cpp backend assets from your asset release
+    # 1. Fetch pre-compiled dynamic llama.cpp backend assets from asset release
     - name: Download Llama.cpp Runtimes from Release
       uses: robinraju/release-downloader@v1
       with:
@@ -35,7 +35,7 @@ jobs:
         fileName: "yollama-b9840-lib.tar.gz"
         out-file-path: "lib"
 
-    # 2. Extract the backend assets into the 'lib' directory
+    # 2. Extract backend assets into 'lib' directory
     - name: Unpack Backend Assets
       run: |
         cd lib
@@ -54,12 +54,12 @@ jobs:
         go generate ./...
         go build -v -trimpath -o yollama .
 
-    # 3. Package the binary, the 'lib' folder, and your interactive install.sh together
+    # 3. Package binary, 'lib' folder, and interactive setup_yollama.sh script
     - name: Package Full Bundle into Tarball
       run: |
         mkdir -p package/lib
         cp yollama package/
-        cp install.sh package/
+        cp setup_yollama.sh package/
         cp -P lib/*.so* package/lib/ || true
         cp lib/llama-server package/lib/ || true
         cp lib/llama-quantize package/lib/ || true
