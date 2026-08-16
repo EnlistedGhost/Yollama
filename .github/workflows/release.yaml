@@ -25,9 +25,39 @@ jobs:
     steps:
     - name: Checkout repository code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Required to commit, tag, and push version updates properly
 
-    # 1. Fetch pre-compiled dynamic llama.cpp backend assets from asset release
-    - name: Download Llama.cpp Runtimes from Release
+    # 1. Automatically increment the version string inside version/version.go on master pushes
+    - name: Increment Version in version.go (Master Push Only)
+      id: bump_version
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        CURRENT_LINE=$(grep -E 'var\s+Version\s+string\s*=\s*".*"' version/version.go)
+        RAW_VER=$(echo "$CURRENT_LINE" | sed -E 's/.*"(.*)"/\1/')
+        
+        PREFIX=$(echo "$RAW_VER" | sed -E 's/^([0-9]+\.[0-9]+\.).*/\1/')
+        PATCH_AND_SUFFIX=$(echo "$RAW_VER" | sed -E 's/^[0-9]+\.[0-9]+\.(.*)/\1/')
+        PATCH_NUM=$(echo "$PATCH_AND_SUFFIX" | grep -oE '^[0-9]+')
+        SUFFIX=$(echo "$PATCH_AND_SUFFIX" | sed -E 's/^[0-9]+(.*)/\1/')
+        
+        NEW_PATCH=$((PATCH_NUM + 1))
+        NEW_RAW_VER="${PREFIX}${NEW_PATCH}${SUFFIX}"
+        NEW_TAG="v${NEW_RAW_VER}"
+        
+        echo "Bumping version from $RAW_VER to $NEW_RAW_VER"
+        sed -i 's/var Version string = "'"$RAW_VER"'"/var Version string = "'"$NEW_RAW_VER"'"/' version/version.go
+        
+        git add version/version.go
+        git commit -m "chore(version): auto-bump version to $NEW_RAW_VER [skip ci]" || echo "No changes"
+        git push origin master || echo "Push skipped"
+        
+        echo "NEW_TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+
+    - name: Fetch pre-compiled dynamic llama.cpp backend assets from asset release
       uses: robinraju/release-downloader@v1
       with:
         repository: "EnlistedGhost/Yollama"
@@ -35,7 +65,6 @@ jobs:
         fileName: "yollama-b9840-lib.tar.gz"
         out-file-path: "lib"
 
-    # 2. Extract backend assets into 'lib' directory
     - name: Unpack Backend Assets
       run: |
         mkdir -p lib
@@ -56,7 +85,6 @@ jobs:
         go generate ./...
         go build -v -trimpath -o yollama .
 
-    # 3. Package binary, 'lib' folder, and interactive setup_yollama.sh script
     - name: Package Full Bundle into Tarball
       run: |
         mkdir -p dist
@@ -76,10 +104,19 @@ jobs:
         name: yollama-full-bundle
         path: dist/yollama-linux-amd64.tar.gz
 
+    - name: Create and Push Git Tag Automatically
+      run: |
+        TAG="${{ steps.bump_version.outputs.NEW_TAG }}"
+        if [ -n "$TAG" ]; then
+          git tag -a "$TAG" -m "Automated release tag for $TAG"
+          git push origin "$TAG" || echo "Tag already exists"
+        fi
+
     - name: Publish GitHub Release on Tag Push
       uses: softprops/action-gh-release@v3
-      if: startsWith(github.ref, 'refs/tags/v')
+      if: steps.bump_version.outputs.NEW_TAG != '' || startsWith(github.ref, 'refs/tags/v')
       with:
+        tag_name: ${{ steps.bump_version.outputs.NEW_TAG }}
         files: dist/yollama-linux-amd64.tar.gz
         generate_notes: true
       env:
