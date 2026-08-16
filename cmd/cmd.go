@@ -48,6 +48,7 @@ import (
 	"github.com/ollama/ollama/types/model"
 	"github.com/ollama/ollama/types/syncmap"
 	"github.com/ollama/ollama/version"
+	"github.com/EnlistedGhost/Yollama/hardware"
 )
 
 const ConnectInstructions = "If your browser did not open, navigate to:\n    %s\n\n"
@@ -1849,6 +1850,20 @@ func NewCLI() *cobra.Command {
 		Aliases: []string{"start"},
 		Short:   "Start Yollama",
 		Args:    cobra.ExactArgs(0),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			// Trigger the programmatic loader right before the server starts loops
+			fmt.Println("[INFO] Scanning microarchitecture targets...")
+			engine, err := hardware.LoadOptimalEngine("/usr/local/lib/yollama")
+			if err != nil {
+				// Simply warn and log so you can observe the status without fully crashing out
+				fmt.Fprintf(os.Stderr, "[WARNING] Dynamic engine loading failed: %v\n", err)
+			} else {
+				fmt.Printf("[SUCCESS] Yollama dynamic link established: %s Mode (%s)\n", engine.Mode, engine.FilePath)
+				// Clean handle tracking behavior
+				defer engine.Close()
+			}
+			return nil
+		},
 		RunE:    RunServer,
 	}
 
@@ -1901,6 +1916,23 @@ func NewCLI() *cobra.Command {
 		},
 	}
 	gpuDiscoverCmd.Flags().StringArrayVar(&gpuDiscoverLibDirs, "lib-dir", nil, "Yollama runtime library directory")
+
+	var doctorLibDir string
+	doctorCmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Run system hardware diagnostics and library checks",
+		Args:  cobra.ExactArgs(0),
+		Run: func(cmd *cobra.Command, _ []string) {
+			// Pull the library target and execute your hardware package probe logic
+			libTarget := doctorLibDir
+			if libTarget == "" {
+				libTarget = "/usr/local/lib/yollama"
+			}
+			// Assumes package hardware is imported at the top of this file
+			hardware.PrintDoctorDiagnostics(libTarget)
+		},
+	}
+	doctorCmd.Flags().StringVar(&doctorLibDir, "lib-dir", "/usr/local/lib/yollama", "Directory containing shared runtime libraries")
 
 	envVars := envconfig.AsMap()
 
@@ -1962,6 +1994,7 @@ func NewCLI() *cobra.Command {
 		copyCmd,
 		deleteCmd,
 		gpuDiscoverCmd,
+		doctorCmd,
 	)
 
 	return rootCmd
