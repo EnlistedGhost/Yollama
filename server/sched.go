@@ -51,11 +51,6 @@ type LlmRequest struct {
 	// useMMapAuto is true when UseMMap was derived by the scheduler rather than
 	// explicitly requested.
 	useMMapAuto bool
-
-	// contextShift is a llama-server launch attribute resolved from the
-	// request-level shift option before scheduling.
-	contextShift bool
-	shift        *bool
 }
 
 type Scheduler struct {
@@ -84,7 +79,7 @@ type Scheduler struct {
 // Default automatic value for number of models we allow per GPU
 // Model will still need to fit in VRAM, but loading many small models
 // on a large GPU can cause stalling
-var defaultModelsPerGPU = 3
+var defaultModelsPerGPU = 2
 
 var ErrMaxQueue = errors.New("server busy, please try again.  maximum pending requests exceeded")
 
@@ -129,42 +124,34 @@ func schedulerModelKey(m *Model) string {
 
 // context must be canceled to decrement ref count and release the runner
 func (s *Scheduler) GetRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration) (chan *runnerRef, chan error) {
-	return s.getRunner(c, m, opts, sessionDuration, false, false, nil)
+	return s.getRunner(c, m, opts, sessionDuration, false, false)
 }
 
-const contextShiftSmallContextLimit = 8192
-
-func resolveContextShift(shift *bool, numCtx int) bool {
-	if shift != nil {
-		return *shift
-	}
-
-	return numCtx > 0 && numCtx < contextShiftSmallContextLimit
-}
-
+// TODO: THIS IS FUCKING DISGUSTING OLLAMA! Wtf?!!?! Oh, so you know better than what I set? Hahahahha.... No. (Will be ripped out asap). At least I added some log prints so I can watch how often it has been fucking my and others!
 func effectiveModelContext(numCtx int, f *ggml.GGML) int {
+	fmt.Printf("[YOLLAMA NOTICE] - Effective CTX is checking for possible CTX token overshoot!\n")
 	if f != nil {
 		if trainCtx := int(f.KV().ContextLength()); trainCtx > 0 && numCtx > trainCtx {
+			fmt.Printf("[YOLLAMA NOTICE] - System has decreased CTX token count available to the model!\nReason: CTX amount selected by user was above model's capability!\n")
 			return trainCtx
 		}
 	}
-
 	return numCtx
 }
 
-func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration, numCtxAuto bool, numBatchAuto bool, shift *bool) (chan *runnerRef, chan error) {
-	if opts.NumCtx < 10 {
-		opts.NumCtx = 10
-	}
+func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration, numCtxAuto bool, numBatchAuto bool) (chan *runnerRef, chan error) {
 
-	if m.CheckCapabilities(model.CapabilityVision) == nil {
-		// multimodal models require at least 2048 context
-		opts.NumCtx = max(opts.NumCtx, 2048)
-	}
-
-	contextShift := false
-	if m.ModelPath != "" {
-		contextShift = resolveContextShift(shift, opts.NumCtx)
+	// Handle under-CTX cases
+	if opts.NumCtx < 1024 {
+		fmt.Printf("[YOLLAMA WARNING] - The context token size selected is unrealistically too small!!!\nConsider providing at minimum 4096 CTX tokens!!!\n")
+		if m.CheckCapabilities(model.CapabilityVision) != nil {
+			// multimodal models are automatically provided at least 10256 context
+			opts.NumCtx = 10256
+			fmt.Printf("[YOLLAMA NOTICE] - The context token size is now: 10256\n")
+		} else {
+			opts.NumCtx = 4092
+			fmt.Printf("[YOLLAMA NOTICE] - The context token size is now: 4092\n")
+		}
 	}
 
 	req := &LlmRequest{
@@ -176,8 +163,6 @@ func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, ses
 		errCh:           make(chan error, 1),
 		numCtxAuto:      numCtxAuto,
 		numBatchAuto:    numBatchAuto,
-		contextShift:    contextShift,
-		shift:           shift,
 	}
 
 	key := schedulerModelKey(req.model)
@@ -606,10 +591,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 			}
 
 			launchOpts = s.applyLlamaServerMmapDefaults(req, launchOpts, systemInfo, loadGpus, f, numParallel)
-			req.contextShift = resolveContextShift(req.shift, effectiveModelContext(launchOpts.NumCtx, f))
-
 			config := llamaServerConfigForModel(req.model)
-			config.ContextShift = req.contextShift
 			llama, err = s.newServerFn(systemInfo, loadGpus, req.model.ModelPath, f, req.model.AdapterPaths, req.model.ProjectorPaths, launchOpts, numParallel, config)
 			if err != nil {
 				// some older models are not compatible with newer versions of llama.cpp
@@ -739,7 +721,6 @@ iGPUScan:
 		numCtxAuto:      req.numCtxAuto,
 		numBatchAuto:    req.numBatchAuto,
 		useMMapAuto:     req.useMMapAuto,
-		contextShift:    req.contextShift,
 	}
 	runner.numParallel = numParallel
 	runner.refMu.Lock() // hold lock until running or aborted
@@ -825,7 +806,7 @@ func effectiveLlamaServerContext(numCtx int, f *ggml.GGML, numParallel int) int 
 
 const (
 	llamaServerGenerationBatchDefault = 512
-	llamaServerGenerationBatchMedium  = 1768
+	llamaServerGenerationBatchMedium  = 1576
 	llamaServerGenerationBatchLarge   = 3096
 
 	llamaServerGenerationBatchMediumHeadroomPercent = 60
@@ -1128,20 +1109,12 @@ func logSelectedGPUGroup(all, selected []ml.DeviceInfo) {
 }
 
 func (s *Scheduler) applyLlamaServerMmapDefaults(req *LlmRequest, launchOpts api.Options, systemInfo ml.SystemInfo, gpus []ml.DeviceInfo, f *ggml.GGML, numParallel int) api.Options {
-	predictedCtx := effectiveLlamaServerContext(req.opts.NumCtx, f, numParallel)
-	predictedVRAM := llm.PredictServerVRAM(req.model.ModelPath, f, predictedCtx)
-	availableVRAM, _, _ := availableMemoryForPlacement(systemInfo, gpus, launchOpts)
-
-	if reason := disableMmapDefaultReason(runtime.GOOS, req.opts, gpus, f.KV().BlockCount(), predictedVRAM, availableVRAM); reason != "" {
-		useMmap := false
-		req.opts.UseMMap = &useMmap
-		req.useMMapAuto = false
-		slog.Info("disabling mmap for llama-server load by default",
-			"model", req.model.ModelPath,
-			"reason", reason)
-	} else {
-		s.maybeDisableMmapForHostPressure(req, launchOpts, systemInfo, gpus, f, numParallel)
-	}
+	useMmap := false
+	req.opts.UseMMap = &useMmap
+	req.useMMapAuto = false
+	slog.Info("Disabling mmap for llama-server load by default | ",
+		"Model: ", req.model.ModelPath,
+		" | Reason: It's not smart to beat up your storage drives!")
 
 	launchOpts.UseMMap = req.opts.UseMMap
 	return launchOpts
@@ -1278,10 +1251,13 @@ func (s *Scheduler) loadedMmapModelSizeLocked() uint64 {
 }
 
 func runnerUsesMmap(r *runnerRef) bool {
-	if r == nil || r.Options == nil || r.Options.UseMMap == nil {
-		return true
+	if r == nil {
+		slog.Warn("Auto disabling MMAP...")
+		return false
+	} else {
+		slog.Warn("Auto disabling MMAP...")
 	}
-	return *r.Options.UseMMap
+	return false
 }
 
 func (s *Scheduler) updateFreeSpace(allGpus []ml.DeviceInfo) {
@@ -1350,7 +1326,6 @@ type runnerRef struct {
 	numCtxAuto   bool
 	numBatchAuto bool
 	useMMapAuto  bool
-	contextShift bool
 	*api.Options
 }
 
@@ -1366,7 +1341,6 @@ func (runner *runnerRef) unload() {
 	runner.model = nil
 	runner.Options = nil
 	runner.gpus = nil
-	runner.contextShift = false
 }
 
 func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool {
@@ -1376,7 +1350,7 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 
 	timeout := 10 * time.Second
 	if runner.loading {
-		timeout = 2 * time.Minute // Initial load can take a long time for big models on slow systems...
+		timeout = 5 * time.Minute // Initial load can take a long time for big models on slow systems...
 	}
 
 	if runner.Options == nil {
@@ -1398,14 +1372,6 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 	if optsNew.NumGPU < 0 {
 		optsExisting.NumGPU = -1
 		optsNew.NumGPU = -1
-	}
-
-	contextShift := req.contextShift
-	if req.model.ModelPath != "" {
-		contextShift = resolveContextShift(req.shift, optsNew.NumCtx)
-	}
-	if runner.contextShift != contextShift {
-		return true
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -1431,9 +1397,8 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 func (s *Scheduler) waitForVRAMRecovery(runner *runnerRef, runners []ml.FilteredRunnerDiscovery) chan any {
 	finished := make(chan any, 1)
 
-	// CPU, Metal and iGPUs don't need checking, so no waiting required
-	if len(runner.gpus) == 0 || !runner.discreteGPUs ||
-		(len(runner.gpus) == 1 && runner.gpus[0].Library == "Metal") {
+	// CPU doesn't need checking, so no waiting required
+	if len(runner.gpus) == 0 {
 		finished <- struct{}{}
 		slog.Debug("no need to wait for VRAM recovery", "runner", runner)
 		return finished

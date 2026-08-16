@@ -317,7 +317,14 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		port = 9229
 	}
 
+	// NOTES: IGNORE THESE COMMENTS, they are for myself as notes only.
+	//
 	// Build CLI flags — minimal set, let llama-server auto-detect the rest
+	// DO NOT cache prompt, that's bullshit to reuse my prompts (our prompts)
+	// "--ctx-checkpoints", "32",// Keep context tokens cached for fast reply (Theta doesn't need to reload each time that's dumb)
+	//"8192",
+	// Fuck drafting
+	//"--kv-unified",// need unified for context caching
 	params := []string{
 		"--model", launch.modelPath,
 		"--port", strconv.Itoa(port),
@@ -327,18 +334,18 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		"--offline",
 		"--no-warmup",
 		"--no-repack",
-		"--spec-draft-n-max", "0",// Fuck drafting
+		"--spec-draft-n-max", "0",
 		//"--swa-checkpoints", "0",
-		"--ctx-checkpoints", "32",// Keep context tokens cached for fast reply (Theta doesn't need to reload each time that's dumb)
+		"--ctx-checkpoints", "32",
 		"--reasoning-budget", "-1",
 		"--predict", "-1",
 		"--keep", "0",
 		"--cache-reuse", "0",
-		"--no-cache-prompt",// DO NOT cache prompt, that's bullshit to reuse my prompts (our prompts)
+		"--no-cache-prompt",
 		"--log-colors", "on",
-		//"--no-kv-unified",
-		"--kv-unified",// need unified for context caching
+		"--kv-unified",
 		"--no-context-shift",
+		"--no-cache-idle-slots",
 		"--sleep-idle-seconds", "-1",
 		"--slot-prompt-similarity", "0.0",
 		"-c", strconv.Itoa(launch.opts.NumCtx * launch.numParallel),

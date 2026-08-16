@@ -175,7 +175,7 @@ func (s *Server) scheduleRunner(ctx context.Context, name string, capable []mode
 		return nil, nil, nil, err
 	}
 
-	runnerCh, errCh := s.sched.getRunner(ctx, model, opts, keepAlive, numCtxAuto, numBatchAuto, shift)
+	runnerCh, errCh := s.sched.getRunner(ctx, model, opts, keepAlive, numCtxAuto, numBatchAuto)
 	var runner *runnerRef
 	select {
 	case runner = <-runnerCh:
