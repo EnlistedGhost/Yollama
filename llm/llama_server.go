@@ -348,6 +348,8 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		"--no-cache-idle-slots",
 		"--sleep-idle-seconds", "-1",
 		"--slot-prompt-similarity", "0.0",
+		"--split-mode", "tensor",
+		"-t", "12",
 		"-c", strconv.Itoa(launch.opts.NumCtx * launch.numParallel),
 		"-np", strconv.Itoa(launch.numParallel),
 	}
