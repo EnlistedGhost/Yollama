@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -1314,11 +1315,45 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	return r, nil
 }
 
+func getPath_SSL_FileConfig() (string, error) {
+	// 1. Get the dynamic home directory path
+	usrDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("SSL_Config: Error no such directory found: %v", err)
+	}
+
+	// Join the home directory with the .yollama folder
+	ollamaPath := filepath.Join(homeUserDir, ".yollama")
+	fmt.Println("Yollama directory:", ollamaPath)
+	
+	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "yollama_ssl.conf")
+	return pathSchedBatchNumConfig, err
+}
+
+func readPath_SSL_FileConfig(sslLoaderConfigPath string) (int, error) {
+	// Read entire file into byte slice
+	sslConfigForLoader, err := os.ReadFile(batchLoaderNumPath)
+	if err != nil {
+		return 0, fmt.Errorf("SSL_Config: failed to read file: %w", err)
+	}
+
+	// Convert bytes to string (trim whitespace and newlines)
+	sslCertForLoader := strings.TrimSpace(string(sslConfigForLoader))
+
+	// Convert string to integer
+	sslLoaderCert, err := strconv.Atoi(sslCertForLoader)
+	if err != nil {
+		return 0, fmt.Errorf("SSL_Config: error converting configured loader batch size str to num")
+	}
+
+	return numLoaderCert, err
+}
+
 func Serve(ln net.Listener) error {
 	slog.SetDefault(logutil.NewLogger(os.Stderr, envconfig.LogLevel()))
 	slog.Info("server config", "env", envconfig.Values())
 	cloudDisabled, _ := internalcloud.Status()
-	slog.Info(fmt.Sprintf("Yollama cloud disabled: %t", cloudDisabled))
+	slog.Info(fmt.Sprintf("[YOLLAMA] | cloud disabled: %t", cloudDisabled))
 
 	blobsDir, err := manifest.BlobsPath("")
 	if err != nil {
@@ -1369,7 +1404,8 @@ func Serve(ln net.Listener) error {
 	s.sched = sched
 	s.modelCaches.Start(ctx)
 
-	slog.Info(fmt.Sprintf("Yollama Started with IP-Address: %s | Current Version: %s", ln.Addr(), version.Version))
+	slog.Info(fmt.Sprintf("[YOLLAMA] | Server Started using IP-Address: %s", ln.Addr())
+	slog.Info(fmt.Sprintf("[YOLLAMA] | Build Version: %s", version.Version))
 	srvr := &http.Server{
 		// Use http.DefaultServeMux so we get net/http/pprof for
 		// free.
@@ -1403,19 +1439,36 @@ func Serve(ln net.Listener) error {
 		totalVRAM += gpu.TotalMemory - envconfig.GpuOverhead()
 	}
 
-	// Set default context based on VRAM tier
-	// Use slightly lower thresholds (47/23 GiB vs. 48/24 GiB) to account for small differences in the exact value
-	switch {
-	case totalVRAM >= 47*format.GibiByte:
-		s.defaultNumCtx = 262144
-	case totalVRAM >= 23*format.GibiByte:
-		s.defaultNumCtx = 32768
-	default:
-		s.defaultNumCtx = 4096
-	}
-	slog.Info("vram-based default context", "total_vram", format.HumanBytes2(totalVRAM), "default_num_ctx", s.defaultNumCtx)
+	// Set default context (User settings will override)
+	s.defaultNumCtx = 4096
 
-	err = srvr.Serve(ln)
+	slog.Info("\n- Server VRAM and Default Context Tokens -\n", "Available VRAM:", format.HumanBytes2(totalVRAM), "\nContext Tokens:", s.defaultNumCtx)
+
+	// --- START DIRECT SSL INJECTION FOR YOLLAMA ---
+	certFile := "./localhost+3.pem"
+	keyFile  := "./localhost+3-key.pem"
+
+	slog.Info("[YOLLAMA] | 🔒 Enabling Native TLS/HTTPS wrapper on listener...")
+	
+	// 1. Load the mkcert certificate keys
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		slog.Error("[YOLLAMA] | ❌ Failed to load SSL certificates. Make sure they are in the binary folder!", "error", err)
+		return err
+	}
+
+	// 2. Setup standard TLS Configuration
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+
+	// 3. Wrap the raw network listener in a TLS container
+	tlsListener := tls.NewListener(ln, tlsConfig)
+
+	// 4. Pass the modified TLS listener to the server execution block
+	err = srvr.Serve(tlsListener)
+	// --- END DIRECT SSL INJECTION FOR YOLLAMA ---
+
 	// If server is closed from the signal handler, wait for the ctx to be done
 	// otherwise error out quickly
 	if !errors.Is(err, http.ErrServerClosed) {
