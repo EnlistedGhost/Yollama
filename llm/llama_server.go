@@ -131,8 +131,8 @@ type llamaServerRunner struct {
 
 	sem *semaphore.Weighted
 
-	launch                  llamaServerLaunchConfig
-	output                  *memoryParsingWriter
+	launch                 llamaServerLaunchConfig
+	output                 *memoryParsingWriter
 	mmprojOffloadOOMRetried bool
 }
 
@@ -270,36 +270,89 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 	// Build CLI flags — minimal set, let llama-server auto-detect the rest
 	// DO NOT cache prompt, that's bullshit to reuse my prompts (our prompts)
 	// Fuck drafting
+	// files can be accessed via file:// URLs using relative paths
+	/*
+	    "--temperature": useForMsgTemp,
+		"--top_k": "95.8205",
+		"--top_p": "0.7905",
+		"--min_p": "0.5207",
+		"num_ctx": "31982",
+		"use_mmap": false,
+		"num_keep": 0,
+		"num_batch": 2048,
+		"num_gpu": -1,
+		"repeat_penalty": 1.098,
+		"repeat_last_n": 52,
+		"draft_num_predict": 0,
+		"n_predict": -1,
+		"max_tokens": -1,
+		"speculative.n_max": 0,
+		"speculative.n_min": 0,
+		"modalities": {
+		  "vision": true
+		},
+		"is_sleeping": false,
+		"cache_prompt": false,
+		"n_cache_reuse": 0,
+		"n_swa_cheakpoints": 0,
+		"warmup": false,
+		"display_prompt": true,
+		"kv_unified": false,
+		"offline": true,
+		"tfz": 1.85,
+		"think": false,
+		"thinking": false,
+    */
 	params := []string{
 		"--model", launch.modelPath,
 		"--port", strconv.Itoa(port),
 		"--host", "127.0.0.1",
+		"--temperature", "1.25",
+		"--top_k", "95.8205",
+		"--top_p", "0.7905",
+		"--min_p", "0.5207",
+		"--batch-size", "2048",
+		"--repeat-last-n", "52",
+		"--repeat-penalty", "1.098",
 		"--cache-ram", "1024",
+		"--flash-attn", "on",
+		"--jinja",
 		"--no-webui",
 		"--offline",
 		"--no-warmup",
 		"--no-repack",
 		"--spec-draft-n-max", "0",
-		//"--swa-checkpoints", "0",
 		"--ctx-checkpoints", "2",
 		"--reasoning-budget", "-1",
-		"--predict", "-1",
+		"--n-predict", "-1",
 		"--keep", "0",
 		"--cache-reuse", "0",
 		"--no-cache-prompt",
-		"--log-colors", "on",
-		"--kv-unified",
+		"--no-kv-unified",
 		"--no-context-shift",
 		"--no-cache-idle-slots",
 		"--sleep-idle-seconds", "-1",
 		"--slot-prompt-similarity", "0.0",
 		"--split-mode", "tensor",
-		"-t", "12",
-		"-c", "51982",
-		"-np", "1",
+		"--load-mode", "none",
+		"--threads", "12",
+		"--threads-http", "12",
+		"--ctx-size", "27982",
+		"--parallel", "1",
+		"--log-verbosity", "4",
+		"--no-log-prefix",
+		"--no-log-timestamps",
+		"--image-min-tokens", "4096",
+		"--mmproj-offload",
+		"--reasoning-format", "deepseek-legacy",
+		"--log-prompts-dir", "/home/sera/.yollama/prompts",
+		"--media-path", "/home/sera/.glassmorphic/.glassmorphism_media",
+		"--fit", "on",
+		"--main-gpu", "0",
+		"--agent",
 	}
-	params = appendLlamaServerLogArgs(params)
-	params = appendJinjaArgs(params, launch.config)
+	//params = appendLlamaServerLogArgs(params)
+	//params = appendJinjaArgs(params, launch.config)
 
 	params = appendMMProjArgs(params, launch)
 	//params = appendMTPDraftArgs(params, launch.config, launch.opts)
@@ -313,7 +366,7 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 
 	// Do not UseMmap
 	//if launch.opts.UseMMap != nil && !*launch.opts.UseMMap {
-	params = append(params, "--no-mmap")
+	//params = append(params, "--no-mmap")
 	//}
 
 
@@ -959,7 +1012,7 @@ type llamaServerMultimodalPrompt struct {
 // llamaServerCompletionResponse is the response format from llama-server's /completion endpoint.
 type llamaServerCompletionResponse struct {
 	Content                 string                 `json:"content"`
-	Stop                    bool                   `json:"stop"`
+	Stop                 bool                 `json:"stop"`
 	StopType                string                 `json:"stop_type"`
 	Timings                 llamaServerTimings     `json:"timings"`
 	CompletionProbabilities []llamaServerTokenProb `json:"completion_probabilities"`
@@ -988,7 +1041,7 @@ type llamaServerChatChoice struct {
 type llamaServerChatResponse struct {
 	Choices []llamaServerChatChoice `json:"choices"`
 	Timings llamaServerTimings      `json:"timings"`
-	Error   any                     `json:"error"`
+	Error   any                 `json:"error"`
 }
 
 type llamaServerTimings struct {

@@ -518,6 +518,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 			if loadErr != nil {
 				slog.Info("failed to load model metadata", "model", req.model.ModelPath, "error", loadErr)
 				req.errCh <- loadErr
+				//s.loadedMu.Lock()
 				s.loadedMu.Unlock()
 				return false
 			}
@@ -526,8 +527,9 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 
 			// evict before spawning.
 			if len(s.loaded) > 0 && len(loadGpus) > 0 {
-					s.loadedMu.Unlock()
-					return true
+				//s.loadedMu.Lock()
+				s.loadedMu.Unlock()
+				return true
 			}
 
 			launchOpts = s.applyLlamaServerLaunchConfigs(req, launchOpts, systemInfo, loadGpus, f, numParallel)
@@ -545,6 +547,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 		if err != nil {
 			slog.Info("failed to create server", "model", req.model.ShortName, "error", err)
 			req.errCh <- err
+			//s.loadedMu.Lock()
 			s.loadedMu.Unlock()
 			return false
 		}
@@ -596,6 +599,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 		slog.Info("Load failed", "model", req.model.ModelPath, "error", err)
 		s.activeLoading.Close()
 		s.activeLoading = nil
+		s.loadedMu.Lock()
 		s.loadedMu.Unlock()
 
 		req.errCh <- err
