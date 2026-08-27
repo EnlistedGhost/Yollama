@@ -15,41 +15,10 @@ import (
 	"time"
 
 	"github.com/ollama/ollama/api"
-	internalcloud "github.com/ollama/ollama/internal/cloud"
-	"github.com/ollama/ollama/internal/modelref"
 	"github.com/ollama/ollama/manifest"
 	"github.com/ollama/ollama/types/model"
 	"github.com/ollama/ollama/version"
 )
-
-/*
-The /api/show cache stores full api.ShowResponse values because callers use
-more than capabilities: launch flows also need context length, embeddings
-metadata, quantization details, remote metadata, and model-specific fields.
-TODO(parthsareen): Consider removing show cache if /api/tags grows to cover
-the remaining callers.
-
-Local model entries are stored lazily by canonical model name and verbose flag,
-with the manifest digest recorded in the entry. The manifest digest is the
-freshness boundary: if the model content changes, the digest changes, so the
-previous response is replaced instead of accumulating under an old digest key.
-Requests with System or Options overlays bypass the cache because those overlays
-mutate the effective show response.
-
-Cloud model entries are keyed by normalized cloud base model name and verbose.
-They use stale-while-revalidate behavior: a warm read returns the cached
-response immediately and starts a throttled background refresh for that model.
-Cold cloud reads preserve existing proxy behavior. Local and cloud entries live
-in separate maps, so a local "qwen3.5" and an explicit "qwen3.5:cloud" cannot
-collide. The cloud suffix is request routing intent; api.ShowResponse does not
-carry a model-name field to reconstruct on the way out.
-
-The cache is process-local. Cloud startup hydration runs asynchronously from
-cloud tags, while local show responses are populated on demand. No show
-responses are written to or read from ~/.yollama/cache/show. That keeps cache
-lifetime tied to the server process and avoids snapshot freshness and
-invalidation cases for this iteration.
-*/
 
 const (
 	modelShowCloudFetchTimeout         = 3 * time.Second
@@ -125,7 +94,7 @@ func modelShowCacheable(req api.ShowRequest) bool {
 // is expensive for large model stores.
 func (c *modelShowCache) Start(ctx context.Context) {
 	c.once.Do(func() {
-		slog.Debug("starting model show cache")
+		slog.Debug("[Yollama] - starting model show cache")
 		go c.runStartup(ctx)
 	})
 }
@@ -133,19 +102,11 @@ func (c *modelShowCache) Start(ctx context.Context) {
 // runStartup hydrates the cloud cache. It is only called in a goroutine from
 // Start, so cloud requests cannot delay the listener from accepting traffic.
 func (c *modelShowCache) runStartup(ctx context.Context) {
-	if err := c.hydrateCloud(ctx); err != nil {
-		switch {
-		case errors.Is(err, context.Canceled):
-		case errors.Is(err, errModelShowNoCloud):
-			slog.Debug("skipping model show cloud cache hydration because cloud is disabled")
-		default:
-			slog.Warn("model show cloud cache hydration failed", "error", err)
-		}
-	}
+		slog.Debug("[Yollama] - Cloud is disabled, and always will be!")
 }
 
 // GetLocal returns a cached local show response when the current manifest
-// digest matches. On a miss, it falls back to GetModelInfo, stores non-remote
+// digest matches. On a miss, it falls back to GetModelInfo, stores
 // local responses, and returns a clone to the caller.
 func (c *modelShowCache) GetLocal(req api.ShowRequest) (*api.ShowResponse, error) {
 	key, digest, err := modelShowLocalKeyForRequest(req)
@@ -163,25 +124,14 @@ func (c *modelShowCache) GetLocal(req api.ShowRequest) (*api.ShowResponse, error
 		return nil, err
 	}
 
-	if resp.RemoteHost == "" {
-		c.setLocal(key, digest, resp)
-	}
+	c.setLocal(key, digest, resp)
 
 	return cloneShowResponse(resp), nil
 }
 
-// GetCloudSWR returns a cached cloud show response and triggers a throttled
-// background refresh. The boolean is false on a cold miss so callers can
-// preserve existing synchronous proxy behavior.
+// GetCloudSWR returns nil
 func (c *modelShowCache) GetCloudSWR(ctx context.Context, req api.ShowRequest) (*api.ShowResponse, bool) {
-	key := modelShowCloudKeyForModel(req.Model, req.Verbose)
-	resp, ok := c.getCloud(key)
-	if !ok {
 		return nil, false
-	}
-
-	c.triggerCloudRefreshOnRead(ctx, key)
-	return resp, true
 }
 
 func (c *modelShowCache) getLocal(key modelShowLocalKey, digest string) (*api.ShowResponse, bool) {
@@ -277,17 +227,7 @@ func (c *modelShowCache) triggerCloudRefreshOnRead(ctx context.Context, key mode
 // returned without touching the existing cached entry, which preserves stale
 // data for future reads.
 func (c *modelShowCache) refreshCloud(ctx context.Context, key modelShowCloudKey) error {
-	if disabled, _ := internalcloud.Status(); disabled {
-		return errModelShowNoCloud
-	}
-
-	resp, err := c.fetchCloudShow(ctx, key.Model, key.Verbose)
-	if err != nil {
-		return err
-	}
-
-	c.setCloud(key, resp)
-	return nil
+	return errModelShowNoCloud
 }
 
 // hydrateLocal scans manifests at startup and refreshes only entries missing
@@ -302,10 +242,6 @@ func (c *modelShowCache) hydrateLocal(ctx context.Context) error {
 	for name, mf := range manifests {
 		if err := ctx.Err(); err != nil {
 			return err
-		}
-
-		if modelShowManifestIsRemote(mf) {
-			continue
 		}
 
 		modelName := name.String()
@@ -323,119 +259,10 @@ func (c *modelShowCache) hydrateLocal(ctx context.Context) error {
 			slog.Warn("failed to hydrate local model show cache", "model", modelName, "error", err)
 			continue
 		}
-		if resp.RemoteHost != "" {
-			continue
-		}
 
 		c.setLocal(key, digest, resp)
 	}
 	return nil
-}
-
-// hydrateCloud refreshes cloud show entries by listing cloud tags and fetching
-// /api/show for each returned model with bounded concurrency. Per-model show
-// failures are logged and skipped so one bad cloud entry does not prevent the
-// rest of the cache from warming.
-func (c *modelShowCache) hydrateCloud(ctx context.Context) error {
-	if disabled, _ := internalcloud.Status(); disabled {
-		return errModelShowNoCloud
-	}
-
-	models, err := c.fetchCloudTags(ctx)
-	if err != nil {
-		return err
-	}
-
-	jobs := make(chan string)
-	var wg sync.WaitGroup
-
-	worker := func() {
-		defer wg.Done()
-		for modelName := range jobs {
-			if ctx.Err() != nil {
-				continue
-			}
-
-			key := modelShowCloudKeyForModel(modelName, false)
-			resp, err := c.fetchCloudShow(ctx, key.Model, key.Verbose)
-			if err != nil {
-				slog.Warn("failed to hydrate cloud model show cache", "model", key.Model, "error", err)
-				continue
-			}
-
-			c.setCloud(key, resp)
-		}
-	}
-
-	workers := min(modelShowCloudHydrationConcurrency, max(1, len(models)))
-	for range workers {
-		wg.Add(1)
-		go worker()
-	}
-
-sendLoop:
-	for _, modelName := range models {
-		select {
-		case <-ctx.Done():
-			break sendLoop
-		case jobs <- modelName:
-		}
-	}
-	close(jobs)
-	wg.Wait()
-
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// fetchCloudTags returns de-duplicated cloud model names normalized to their
-// show-cache key form. It accepts either ListModelResponse.Model or the legacy
-// Name field because /api/tags responses may contain both.
-func (c *modelShowCache) fetchCloudTags(ctx context.Context) ([]string, error) {
-	var payload api.ListResponse
-	if err := c.doCloudJSON(ctx, http.MethodGet, "/api/tags", nil, &payload); err != nil {
-		return nil, err
-	}
-
-	seen := make(map[string]struct{}, len(payload.Models))
-	models := make([]string, 0, len(payload.Models))
-	for _, item := range payload.Models {
-		name := strings.TrimSpace(item.Model)
-		if name == "" {
-			name = strings.TrimSpace(item.Name)
-		}
-		name = modelShowNormalizeCloudModel(name)
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		models = append(models, name)
-	}
-
-	return models, nil
-}
-
-func (c *modelShowCache) fetchCloudShow(ctx context.Context, modelName string, verbose bool) (*api.ShowResponse, error) {
-	payload := api.ShowRequest{
-		Model:   modelShowNormalizeCloudModel(modelName),
-		Verbose: verbose,
-	}
-
-	var resp api.ShowResponse
-	if err := c.doCloudJSON(ctx, http.MethodPost, "/api/show", payload, &resp); err != nil {
-		return nil, err
-	}
-
-	if resp.ModelInfo == nil {
-		resp.ModelInfo = map[string]any{}
-	}
-	return &resp, nil
 }
 
 // doCloudJSON is the cache's direct cloud client. It mirrors the cloud proxy's
@@ -543,50 +370,6 @@ func modelShowLocalKeyForRequest(req api.ShowRequest) (modelShowLocalKey, string
 		Model:   name.String(),
 		Verbose: req.Verbose,
 	}, mf.Digest(), nil
-}
-
-func modelShowCloudKeyForModel(modelName string, verbose bool) modelShowCloudKey {
-	return modelShowCloudKey{
-		Model:   modelShowNormalizeCloudModel(modelName),
-		Verbose: verbose,
-	}
-}
-
-// modelShowNormalizeCloudModel strips explicit cloud source syntax, including
-// legacy "-cloud" tags, so :cloud and -cloud forms share a cache entry.
-func modelShowNormalizeCloudModel(modelName string) string {
-	modelName = strings.TrimSpace(modelName)
-	if modelName == "" {
-		return ""
-	}
-	if base, stripped := modelref.StripCloudSourceTag(modelName); stripped {
-		return strings.TrimSpace(base)
-	}
-	return modelName
-}
-
-// modelShowManifestIsRemote checks whether a manifest represents a local stub
-// for a remote model. Startup hydration skips these so the local content cache
-// does not store entries whose freshness is governed by cloud state.
-func modelShowManifestIsRemote(mf *manifest.Manifest) bool {
-	if mf == nil || mf.Config.Digest == "" {
-		return false
-	}
-
-	f, err := mf.Config.Open()
-	if err != nil {
-		slog.Warn("failed to open manifest config while checking model show cache eligibility", "error", err)
-		return false
-	}
-	defer f.Close()
-
-	var cfg model.ConfigV2
-	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
-		slog.Warn("failed to decode manifest config while checking model show cache eligibility", "error", err)
-		return false
-	}
-
-	return cfg.RemoteHost != "" || cfg.RemoteModel != ""
 }
 
 // cloneShowResponse deep-copies mutable fields of api.ShowResponse before

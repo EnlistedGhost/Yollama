@@ -360,18 +360,8 @@ func loadOrUnloadModel(cmd *cobra.Command, opts *runOptions) error {
 	}
 
 	if info, err := client.Show(cmd.Context(), &api.ShowRequest{Model: opts.Model}); err != nil {
+		slog.Warn("loadorUnloadModel function is annoying:", info)
 		return err
-	} else if info.RemoteHost != "" {
-		if opts.ShowConnect {
-			p.StopAndClear()
-			remoteModel := info.RemoteModel
-			if remoteModel == "" {
-				remoteModel = opts.Model
-			}
-			fmt.Fprintf(os.Stderr, "Connecting to '%s' on '%s'\n", remoteModel, info.RemoteHost)
-		}
-
-		return nil
 	}
 
 	req := &api.GenerateRequest{
@@ -688,11 +678,7 @@ func ListHandler(cmd *cobra.Command, args []string) error {
 	for _, m := range models.Models {
 		if len(args) == 0 || strings.HasPrefix(strings.ToLower(m.Name), strings.ToLower(args[0])) {
 			var size string
-			if m.RemoteModel != "" {
-				size = "-"
-			} else {
-				size = format.HumanBytes(m.Size)
-			}
+			size = format.HumanBytes(m.Size)
 
 			data = append(data, []string{m.Name, m.Digest[:12], size, format.HumanTime(m.ModifiedAt, "Never")})
 		}
@@ -889,11 +875,6 @@ func showInfo(resp *api.ShowResponse, verbose bool, w io.Writer) error {
 	}
 
 	tableRender("Model", func() (rows [][]string) {
-		if resp.RemoteHost != "" {
-			rows = append(rows, []string{"", "Remote model", resp.RemoteModel})
-			rows = append(rows, []string{"", "Remote URL", resp.RemoteHost})
-		}
-
 		if resp.ModelInfo != nil {
 			arch, _ := resp.ModelInfo["general.architecture"].(string)
 			if arch != "" {

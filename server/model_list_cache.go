@@ -24,8 +24,6 @@ import (
 type modelListSummary struct {
 	Model        string
 	Name         string
-	RemoteModel  string
-	RemoteHost   string
 	Size         int64
 	Digest       string
 	ModifiedAt   time.Time
@@ -318,8 +316,6 @@ func buildModelListSummary(name model.Name, mf *manifest.Manifest) (modelListSum
 	summary := modelListSummary{
 		Model:       name.DisplayShortest(),
 		Name:        name.DisplayShortest(),
-		RemoteModel: cfg.RemoteModel,
-		RemoteHost:  cfg.RemoteHost,
 		Size:        mf.Size(),
 		Digest:      mf.Digest(),
 		ModifiedAt:  modified,
@@ -339,7 +335,7 @@ func buildModelListSummary(name model.Name, mf *manifest.Manifest) (modelListSum
 		return modelListSummary{}, err
 	}
 
-	if cfg.RemoteHost == "" && cfg.RemoteModel == "" && modelPath != "" {
+	if modelPath != "" {
 		info, err := readModelListGGUF(modelPath)
 		if err != nil {
 			slog.Debug("failed to read gguf model metadata", "model", name.String(), "error", err)
@@ -415,11 +411,6 @@ func readModelListLayers(mf *manifest.Manifest, summary *modelListSummary) (stri
 				return "", 0, err
 			}
 			fmt.Println("Yollama has read model blob file:", LOCALpath)
-
-			//tmpl, err = ollamatemplate.Parse(string(bts))
-			//if err != nil {
-			//	return "", 0, nil, err
-			//}
 		}
 	}
 
@@ -765,8 +756,6 @@ func (s modelListSummary) ListModelResponse() api.ListModelResponse {
 	resp := api.ListModelResponse{
 		Model:       s.Model,
 		Name:        s.Name,
-		RemoteModel: s.RemoteModel,
-		RemoteHost:  s.RemoteHost,
 		Size:        s.Size,
 		Digest:      s.Digest,
 		ModifiedAt:  s.ModifiedAt,

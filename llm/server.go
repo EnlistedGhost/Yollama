@@ -79,9 +79,6 @@ type LlamaServer interface {
 
 type LlamaServerConfig struct {
 	DisableJinja   bool
-	ContextShift   bool
-	EnableMTP      bool
-	DraftModelPath string
 }
 
 // LoadModel will load a model from disk. The model must be in the GGML format.
@@ -105,7 +102,7 @@ func LoadModel(model string, maxArraySize int) (*ggml.GGML, error) {
 
 // NewLlamaServer creates a new llama-server runner for the given model.
 // All GGML models are served via the upstream llama-server subprocess.
-func NewLlamaServer(systemInfo ml.SystemInfo, gpus []ml.DeviceInfo, modelPath string, f *ggml.GGML, adapters, projectors []string, opts api.Options, numParallel int, config LlamaServerConfig) (LlamaServer, error) {
+func NewLlamaServer(systemInfo ml.SystemInfo, gpus []ml.DeviceInfo, modelPath string, f *ggml.GGML, projectors []string, opts api.Options, numParallel int, config LlamaServerConfig) (LlamaServer, error) {
 	slog.Info("using llama-server for model", "model", modelPath)
 
 	// Verify the requested context size is <= the model training size
@@ -116,7 +113,7 @@ func NewLlamaServer(systemInfo ml.SystemInfo, gpus []ml.DeviceInfo, modelPath st
 	}
 
 	kvct := strings.ToLower(envconfig.KvCacheType())
-	return NewLlamaServerRunner(gpus, modelPath, f, adapters, projectors, opts, numParallel, kvct, config)
+	return NewLlamaServerRunner(gpus, modelPath, f, projectors, opts, numParallel, kvct, config)
 }
 
 // Server status types
@@ -210,8 +207,6 @@ type CompletionRequest struct {
 	Options *api.Options
 
 	Grammar         string // set before sending the request to the subprocess
-	Shift           bool
-	Truncate        bool
 	PreservedTokens []string // parser tokens to render as text; ignored by non-llama-server runners
 	ToolCallTag     string   // raw generic tool parser tag, if any
 	LeadingBOS      string   // textual BOS emitted by Go rendering, if any
@@ -221,12 +216,6 @@ type CompletionRequest struct {
 
 	// TopLogprobs specifies the number of most likely alternative tokens to return (0-20)
 	TopLogprobs int
-
-	// Image generation fields
-	Width  int32 `json:"width,omitempty"`
-	Height int32 `json:"height,omitempty"`
-	Steps  int32 `json:"steps,omitempty"`
-	Seed   int64 `json:"seed,omitempty"`
 }
 
 type ChatRequest struct {
@@ -235,7 +224,6 @@ type ChatRequest struct {
 	Format   json.RawMessage
 	Options  *api.Options
 	Think    *api.ThinkValue
-	Shift    bool
 
 	Logprobs    bool
 	TopLogprobs int
@@ -295,13 +283,4 @@ type CompletionResponse struct {
 
 	// Logprobs contains log probability information if requested
 	Logprobs []Logprob `json:"logprobs,omitempty"`
-
-	// Image contains base64-encoded image data for image generation
-	Image string `json:"image,omitempty"`
-
-	// Step is the current step in image generation
-	Step int `json:"step,omitempty"`
-
-	// TotalSteps is the total number of steps for image generation
-	TotalSteps int `json:"total_steps,omitempty"`
 }
