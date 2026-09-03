@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"image"
 	"io"
-	"io/fs"
 	"log"
 	"log/slog"
 	"math"
@@ -22,7 +21,6 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 	"path/filepath"
@@ -31,7 +29,6 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/image/webp"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/auth"
@@ -72,9 +69,9 @@ type Server struct {
 // Set to either release or debug if development iteration (default)
 func init() {
 	switch mode {
-	case gin.DebugMode:
+	//case gin.DebugMode:
 	case gin.ReleaseMode:
-	case gin.TestMode:
+	//case gin.TestMode:
 	default:
 		mode = gin.ReleaseMode
 	}
@@ -88,10 +85,10 @@ var (
 )
 
 func (s *Server) modelOptions(model *Model, requestOpts map[string]any) (api.Options, error) {
-	return s.modelOptionsWithEmbeddingBatchDefault(model, requestOpts, shouldApplyEmbeddingBatchDefault(model, requestOpts))
+	return s.modelOptionsBatchDefault(model, requestOpts, applyBatchDefault(model, requestOpts))
 }
 
-func (s *Server) modelOptionsWithEmbeddingBatchDefault(model *Model, requestOpts map[string]any, applyEmbeddingBatchDefault bool) (api.Options, error) {
+func (s *Server) modelOptionsBatchDefault(model *Model, requestOpts map[string]any, applyModelBatchDefault bool) (api.Options, error) {
 	opts := api.DefaultOptions()
 	if opts.NumCtx == 0 {
 		opts.NumCtx = s.defaultNumCtx
@@ -108,10 +105,14 @@ func (s *Server) modelOptionsWithEmbeddingBatchDefault(model *Model, requestOpts
 		return api.Options{}, err
 	}
 
+	if applyModelBatchDefault {
+		opts = llm.WithDefaultModelNumBatch(opts)
+	}
+
 	return opts, nil
 }
 
-func shouldApplyEmbeddingBatchDefault(m *Model, requestOpts map[string]any) bool {
+func applyBatchDefault(m *Model, requestOpts map[string]any) bool {
 	if m == nil || hasOption(m.Options, "num_batch") || hasOption(requestOpts, "num_batch") {
 		return false
 	}
@@ -166,13 +167,15 @@ func (s *Server) scheduleRunner(ctx context.Context, name string, capable []mode
 		return nil, nil, nil, fmt.Errorf("%s %w", name, err)
 	}
 
-	embeddingBatchDefault := shouldApplyEmbeddingBatchDefault(model, requestOpts)
-	opts, err := s.modelOptionsWithEmbeddingBatchDefault(model, requestOpts, embeddingBatchDefault)
+	numCtxAuto := usesAutomaticNumCtx(model, requestOpts)
+	embeddingBatchDefault := applyBatchDefault(model, requestOpts)
+	numBatchAuto := usesAutomaticNumBatch(model, requestOpts) && !embeddingBatchDefault
+	opts, err := s.modelOptionsBatchDefault(model, requestOpts, embeddingBatchDefault)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	runnerCh, errCh := s.sched.getRunner(ctx, model, opts, keepAlive)
+	runnerCh, errCh := s.sched.getRunner(ctx, model, opts, keepAlive, numCtxAuto, numBatchAuto)
 	var runner *runnerRef
 	select {
 	case runner = <-runnerCh:
@@ -194,440 +197,6 @@ func signinURL() (string, error) {
 	return fmt.Sprintf("signinURLStr", url.PathEscape(h), encKey), nil
 }
 
-func (s *Server) GenerateHandler(c *gin.Context) {
-	var req api.GenerateRequest
-	if err := c.ShouldBindJSON(&req); errors.Is(err, io.EOF) {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
-		return
-	} else if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if req.TopLogprobs < 0 || req.TopLogprobs > 20 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "top_logprobs must be between 0 and 20"})
-		return
-	}
-
-	modelRef, err := parseAndValidateModelRef(req.Model)
-	if err != nil {
-		writeModelRefParseError(c, err, http.StatusNotFound, fmt.Sprintf("model '%s' not found", req.Model))
-		return
-	}
-
-	name := modelRef.Name
-
-	// We cannot currently consolidate this into GetModel because all we'll
-	// induce infinite recursion given the current code structure.
-	name, err = getExistingName(name)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", req.Model)})
-		return
-	}
-
-	m, err := GetModel(name.String())
-	if err != nil {
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", req.Model)})
-		case err.Error() == errtypes.InvalidModelNameErrMsg:
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		return
-	}
-
-	if req.TopLogprobs < 0 || req.TopLogprobs > 20 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "top_logprobs must be between 0 and 20"})
-		return
-	}
-
-	// expire the runner if unload is requested (empty prompt, keep alive is 0)
-	//if req.Prompt == "" && req.KeepAlive.Duration == 0 {
-	//	s.sched.expireRunner(m)
-
-	//	c.JSON(http.StatusOK, api.GenerateResponse{
-	//		Model:      req.Model,
-	//		CreatedAt:  time.Now().UTC(),
-	//		Response:   "",
-	//		Done:       true,
-	//		DoneReason: "unload",
-	//	})
-	//	return
-	//}
-
-	if req.Raw && (req.Template != "" || req.System != "" || len(req.Context) > 0) {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "raw mode does not support template, system, or context"})
-		return
-	}
-
-	capable := []model.Capability{model.CapabilityCompletion}
-	if req.Suffix != "" {
-		capable = append(capable, model.CapabilityInsert)
-	}
-
-	modelCaps := m.Capabilities()
-	if slices.Contains(modelCaps, model.CapabilityThinking) {
-		capable = append(capable, model.CapabilityThinking)
-		if req.Think == nil {
-			req.Think = &api.ThinkValue{Value: true}
-		}
-	} else {
-		if req.Think != nil && req.Think.Bool() {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%q does not support thinking", req.Model)})
-			return
-		}
-	}
-
-	r, m, opts, err := s.scheduleRunner(c.Request.Context(), name.String(), capable, req.Options, req.KeepAlive)
-	slog.Warn("GenerateHandler annoyance:", opts)
-	slog.Warn("GenerateHandler annoyance:", r)
-	if errors.Is(err, errCapabilityCompletion) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%q does not support generate", req.Model)})
-		return
-	} else if err != nil {
-		handleScheduleError(c, req.Model, err)
-		return
-	}
-
-	// load the model
-	//if req.Prompt == "" {
-	//	c.JSON(http.StatusOK, api.GenerateResponse{
-	//		Model:      req.Model,
-	//		CreatedAt:  time.Now().UTC(),
-	//		Done:       true,
-	//		DoneReason: "load",
-	//	})
-	//	return
-	//}
-
-	if slices.Contains(m.Config.ModelFamilies, "mllama") && len(req.Images) > 1 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "this model only supports one image while more than one image requested"})
-		return
-	}
-
-	media := make([]llm.MediaData, len(req.Images))
-	for i := range req.Images {
-		media[i] = llm.NewMediaData(i, req.Images[i])
-	}
-
-	//prompt := req.Prompt
-	//var leadingBOS string
-	//if !req.Raw {
-		//tmpl := m.Template
-		//if req.Template != "" {
-		//	tmpl, err = template.Parse(req.Template)
-		//	if err != nil {
-		//		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		//		return
-		//	}
-		//}
-
-		//var values template.Values
-		//if req.Suffix != "" {
-		//	values.Prompt = prompt
-		//	values.Suffix = req.Suffix
-		//} else {
-		//	var msgs []api.Message
-		//	if req.System != "" {
-		//		msgs = append(msgs, api.Message{Role: "system", Content: req.System})
-		//	} else if m.System != "" {
-		//		msgs = append(msgs, api.Message{Role: "system", Content: m.System})
-		//	}
-
-		//	if req.Context == nil {
-		//		msgs = append(msgs, m.Messages...)
-		//	}
-
-		//	userMsg := api.Message{Role: "user", Content: req.Prompt}
-		//	for _, m := range media {
-		//		userMsg.Images = append(userMsg.Images, m.Data)
-		//	}
-		//	values.Messages = append(msgs, userMsg)
-		//}
-
-		//values.Think = req.Think != nil && req.Think.Bool()
-		//values.ThinkLevel = ""
-		//if req.Think != nil {
-		//	values.ThinkLevel = req.Think.String()
-		//}
-		//values.IsThinkSet = req.Think != nil
-
-		//var b bytes.Buffer
-
-		// check that we're in the `api/chat`-like flow, and if so, generate the
-		// prompt the same way
-		//if values.Messages != nil && values.Suffix == "" && req.Template == "" {
-		//	prompt, media, err = chatPrompt(c.Request.Context(), m, r.Tokenize, optionsForPrompt(opts, r), values.Messages, req.Think)
-		//	if err != nil {
-		//		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		//		return
-		//	}
-		//	if req.Context != nil {
-		//		b.WriteString(prompt)
-		//		prompt = b.String()
-		//	}
-		//	leadingBOS = leadingBOSForModel()
-		//} else {
-		//	// Direct template execution flow.
-		//	if err := tmpl.Execute(&b, values); err != nil {
-		//		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		//		return
-		//	}
-
-		//	prompt = b.String()
-	//	}
-	//}
-
-	// If debug mode is enabled, return the rendered template instead of calling the model
-	//if req.DebugRenderOnly {
-	//	c.JSON(http.StatusOK, api.GenerateResponse{
-	//		Model:     req.Model,
-	//		CreatedAt: time.Now().UTC(),
-	//		DebugInfo: &api.DebugInfo{
-	//			RenderedTemplate: prompt,
-	//			ImageCount:       len(media),
-	//		},
-	//	})
-		//return
-	//}
-	
-	ch := make(chan any)
-	/*
-	go func() {
-		var sb strings.Builder
-		defer close(ch)
-		if err := r.Completion(c.Request.Context(), llm.CompletionRequest{
-			Prompt:          prompt,
-			Media:           media,
-			Format:          req.Format,
-			Options:         opts,
-			Shift:           req.Shift == nil || *req.Shift,
-			Logprobs:        req.Logprobs,
-			TopLogprobs:     req.TopLogprobs,
-			LeadingBOS:      leadingBOS,
-		}, func(cr llm.CompletionResponse) {
-			res := api.GenerateResponse{
-				Model:     req.Model,
-				CreatedAt: time.Now().UTC(),
-				Response:  cr.Content,
-				Done:      cr.Done,
-				Metrics: api.Metrics{
-					PromptEvalCount:    cr.PromptEvalCount,
-					PromptEvalDuration: cr.PromptEvalDuration,
-					EvalCount:          cr.EvalCount,
-					EvalDuration:       cr.EvalDuration,
-				},
-				Logprobs: toAPILogprobs(cr.Logprobs),
-			}
-
-			if _, err := sb.WriteString(cr.Content); err != nil {
-				ch <- gin.H{"error": err.Error()}
-			}
-
-			if cr.Done {
-				res.DoneReason = cr.DoneReason.String()
-
-				if !req.Raw {
-					tokens, err := r.Tokenize(c.Request.Context(), prompt+sb.String())
-					if err != nil {
-						ch <- gin.H{"error": err.Error()}
-						return
-					}
-					res.Context = tokens
-				}
-			}
-
-			ch <- res
-		}); err != nil {
-			s.sched.expireRunnersForRuntimeOOM(m, err)
-			var serr api.StatusError
-			if errors.As(err, &serr) {
-				ch <- gin.H{"error": serr.ErrorMessage, "status": serr.StatusCode}
-			} else {
-				ch <- gin.H{"error": err.Error()}
-			}
-		}
-	}()
-
-	if req.Stream != nil && !*req.Stream {
-		var r api.GenerateResponse
-		var allLogprobs []api.Logprob
-		var sbThinking strings.Builder
-		var sbContent strings.Builder
-		for rr := range ch {
-			switch t := rr.(type) {
-			case api.GenerateResponse:
-				sbThinking.WriteString(t.Thinking)
-				sbContent.WriteString(t.Response)
-				r = t
-				// Accumulate logprobs from all chunks for non-streaming response
-				if len(t.Logprobs) > 0 {
-					allLogprobs = append(allLogprobs, t.Logprobs...)
-				}
-			case gin.H:
-				msg, ok := t["error"].(string)
-				if !ok {
-					msg = "unexpected error format in response"
-				}
-
-				status, ok := t["status"].(int)
-				if !ok {
-					status = http.StatusInternalServerError
-				}
-
-				c.JSON(status, gin.H{"error": msg})
-				return
-			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "unexpected response"})
-				return
-			}
-		}
-
-		r.Thinking = sbThinking.String()
-		r.Response = sbContent.String()
-		r.Logprobs = allLogprobs
-
-		c.JSON(http.StatusOK, r)
-		return
-	}
-	*/
-	streamResponse(c, ch)
-}
-
-func (s *Server) EmbedHandler(c *gin.Context) {
-	var req api.EmbedRequest
-	err := c.ShouldBindJSON(&req)
-	switch {
-	case errors.Is(err, io.EOF):
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
-		return
-	case err != nil:
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	modelRef, err := parseAndValidateModelRef(req.Model)
-	if err != nil {
-		writeModelRefParseError(c, err, http.StatusNotFound, fmt.Sprintf("model '%s' not found", req.Model))
-		return
-	}
-
-	var input []string
-
-	switch i := req.Input.(type) {
-	case string:
-		if len(i) > 0 {
-			input = append(input, i)
-		}
-	case []any:
-		for _, v := range i {
-			if _, ok := v.(string); !ok {
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid input type"})
-				return
-			}
-			input = append(input, v.(string))
-		}
-	default:
-		if req.Input != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid input type"})
-			return
-		}
-	}
-
-	name, err := getExistingName(modelRef.Name)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", req.Model)})
-		return
-	}
-
-	r, m, opts, err := s.scheduleRunner(c.Request.Context(), name.String(), []model.Capability{}, req.Options, req.KeepAlive)
-	slog.Warn("EmbedHandler annoyance:", opts)
-	slog.Warn("EmbedHandler annoyance:", r)
-	if err != nil {
-		handleScheduleError(c, req.Model, err)
-		return
-	}
-
-	if len(input) == 0 {
-		c.JSON(http.StatusOK, api.EmbedResponse{Model: req.Model, Embeddings: [][]float32{}})
-		return
-	}
-
-	kvData, _, err := getModelData(m.ModelPath, false)
-	slog.Warn("EmbedHandler annoyance:", kvData)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx := c.Request.Context()
-
-	embedWithRetry := func(text string) ([]float32, int, error) {
-		emb, tokCount, err := r.Embedding(ctx, text)
-		if err == nil {
-			return emb, tokCount, nil
-		}
-
-		var serr api.StatusError
-		if !errors.As(err, &serr) || serr.StatusCode != http.StatusBadRequest {
-			return nil, 0, err
-		}
-
-		return emb, tokCount, err
-	}
-
-	var g errgroup.Group
-	embeddings := make([][]float32, len(input))
-	var totalTokens uint64
-	for i, text := range input {
-		g.Go(func() error {
-			embedding, tokenCount, err := embedWithRetry(text)
-			if err != nil {
-				return err
-			}
-			// TODO: this first normalization should be done by the model
-			embedding, err = normalize(embedding)
-			if err != nil {
-				return err
-			}
-			if req.Dimensions > 0 && req.Dimensions < len(embedding) {
-				embedding, err = normalize(embedding[:req.Dimensions])
-				if err != nil {
-					return err
-				}
-			}
-			embeddings[i] = embedding
-			atomic.AddUint64(&totalTokens, uint64(tokenCount))
-			return nil
-		})
-	}
-
-	if err := g.Wait(); err != nil {
-		s.sched.expireRunnersForRuntimeOOM(m, err)
-		var serr api.StatusError
-		if errors.As(err, &serr) {
-			c.AbortWithStatusJSON(serr.StatusCode, gin.H{
-				"error": strings.TrimSpace(serr.ErrorMessage),
-			})
-			return
-		}
-
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-			"error": strings.TrimSpace(err.Error()),
-		})
-		return
-	}
-
-	resp := api.EmbedResponse{
-		Model:           req.Model,
-		Embeddings:      embeddings,
-		PromptEvalCount: int(totalTokens),
-	}
-	c.JSON(http.StatusOK, resp)
-}
-
 func normalize(vec []float32) ([]float32, error) {
 	var sum float32
 	for _, v := range vec {
@@ -642,56 +211,6 @@ func normalize(vec []float32) ([]float32, error) {
 		vec[i] *= norm
 	}
 	return vec, nil
-}
-
-func (s *Server) EmbeddingsHandler(c *gin.Context) {
-	var req api.EmbeddingRequest
-	if err := c.ShouldBindJSON(&req); errors.Is(err, io.EOF) {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
-		return
-	} else if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	modelRef, err := parseAndValidateModelRef(req.Model)
-	if err != nil {
-		writeModelRefParseError(c, err, http.StatusBadRequest, "model is required")
-		return
-	}
-
-	name := modelRef.Name
-
-	r, m, _, err := s.scheduleRunner(c.Request.Context(), name.String(), []model.Capability{}, req.Options, req.KeepAlive)
-	slog.Warn("EmbeddingsHandler annoyance:", m)
-	slog.Warn("EmbeddingsHandler annoyance:", r)
-	if err != nil {
-		handleScheduleError(c, req.Model, err)
-		return
-	}
-
-	// an empty request loads the model
-	//if req.Prompt == "" {
-	//	c.JSON(http.StatusOK, api.EmbeddingResponse{Embedding: []float64{}})
-	//	return
-	//}
-
-	//embedding, _, err := r.Embedding(c.Request.Context(), req.Prompt)
-	//if err != nil {
-	//	s.sched.expireRunnersForRuntimeOOM(m, err)
-	//	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": strings.TrimSpace(err.Error())})
-	//	return
-	//}
-
-	var e []float64
-	//for _, v := range embedding {
-	//	e = append(e, float64(v))
-	//}
-
-	resp := api.EmbeddingResponse{
-		Embedding: e,
-	}
-	c.JSON(http.StatusOK, resp)
 }
 
 func (s *Server) PullHandler(c *gin.Context) {
@@ -980,10 +499,6 @@ func GetModelInfo(req api.ShowRequest) (*api.ShowResponse, error) {
 	fmt.Fprint(&sb, modelfile)
 	resp.Modelfile = sb.String()
 
-	if slices.Contains(m.Capabilities(), model.CapabilityImage) {
-		return resp, nil
-	}
-
 	kvData, tensors, err := getModelData(m.ModelPath, req.Verbose)
 	if err != nil {
 		return nil, err
@@ -1041,11 +556,6 @@ func getModelData(digest string, verbose bool) (ggml.KV, ggml.Tensors, error) {
 }
 
 func selectedModelTemplate(m *Model, kv ggml.KV) string {
-	if m.HasChatTemplate && chatModeForModel(m) == chatExecutionModeNative {
-		if chatTemplate := kv.String("tokenizer.chat_template"); chatTemplate != "" {
-			return chatTemplate
-		}
-	}
 	return m.Template.String()
 }
 
@@ -1196,28 +706,29 @@ func isLocalIP(ip netip.Addr) bool {
 func allowedHost(host string) bool {
 	host = strings.ToLower(host)
 
-	if host == "" || host == "localhost" {
-		return true
-	}
+	//if host == "" || host == "localhost" {
+	//	return true
+	//}
 
 	if hostname, err := os.Hostname(); err == nil && host == strings.ToLower(hostname) {
 		return true
 	}
 
-	tlds := []string{
-		"localhost",
-		"local",
-		"internal",
-	}
+	//tlds := []string{
+	//	"localhost",
+	//	"local",
+	//	"internal",
+	//}
 
 	// check if the host is a local TLD
-	for _, tld := range tlds {
-		if strings.HasSuffix(host, "."+tld) {
-			return true
-		}
-	}
+	//for _, tld := range tlds {
+	//	if strings.HasSuffix(host, "."+tld) {
+	//		return true
+	//	}
+	//}
 
-	return false
+	//return false
+	return true
 }
 
 func (s *Server) GenerateRoutes() (http.Handler, error) {
@@ -1240,11 +751,10 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	)
 
 	// General
-	r.HEAD("/", func(c *gin.Context) { c.String(http.StatusOK, "Yollama is running") })
-	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "Yollama is running") })
+	r.HEAD("/", func(c *gin.Context) { c.String(http.StatusOK, "Yollama is running", gin.H{"version": version.Version}) })
+	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "Yollama is running", gin.H{"version": version.Version}) })
 	r.HEAD("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
 	r.GET("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
-	r.GET("/api/status", s.StatusHandler)
 
 	// Local model cache management (new implementation is at end of function)
 	r.POST("/api/pull", s.PullHandler)
@@ -1260,15 +770,11 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	r.POST("/api/copy", s.CopyHandler)
 
 	// Inference
-	r.GET("/api/ps", s.PsHandler)
-	r.POST("/api/generate", s.withInferenceRequestLogging("/api/generate", s.GenerateHandler)...)
 	r.POST("/api/chat", s.withInferenceRequestLogging("/api/chat", s.ChatHandler)...)
-	r.POST("/api/embed", s.EmbedHandler)
-	r.POST("/api/embeddings", s.EmbeddingsHandler)
 
-	//Stop
+	// Stop/Unload (Single or All)
 	r.POST("/api/stop", s.StopModelHandler)
-	r.POST("/api/stop/all", s.StopAllModelsHandler)
+	r.POST("/api/stop_all", s.StopAllModelsHandler)
 
 	return r, nil
 }
@@ -1546,68 +1052,13 @@ func streamResponse(c *gin.Context, ch chan any) {
 	})
 }
 
-func (s *Server) StatusHandler(c *gin.Context) {
-	// Then acquire them, pimp!
-}
-
-func (s *Server) PsHandler(c *gin.Context) {
-	models := []api.ProcessModelResponse{}
-
-	for _, v := range s.sched.loaded {
-		m := v.model
-		displayName := model.ParseName(m.ShortName).DisplayShortest()
-		modelDetails := api.ModelDetails{
-			Format:            m.Config.ModelFormat,
-			Family:            m.Config.ModelFamily,
-			Families:          m.Config.ModelFamilies,
-			ParameterSize:     m.Config.ModelType,
-			QuantizationLevel: m.Config.FileType,
-		}
-
-		mr := api.ProcessModelResponse{
-			Model:     displayName,
-			Name:      displayName,
-			Size:      int64(v.totalSize),
-			SizeVRAM:  int64(v.vramSize),
-			Digest:    m.Digest,
-			Details:   modelDetails,
-			ExpiresAt: v.expiresAt,
-		}
-		if v.llama != nil {
-			mr.ContextLength = v.llama.ContextLength()
-			total, vram := v.llama.MemorySize()
-			mr.Size = int64(total)
-			mr.SizeVRAM = int64(vram)
-		}
-		// The scheduler waits to set expiresAt, so if a model is loading it's
-		// possible that it will be set to the unix epoch. For those cases, just
-		// calculate the time w/ the sessionDuration instead.
-		var epoch time.Time
-		if v.expiresAt == epoch {
-			mr.ExpiresAt = time.Now().Add(v.sessionDuration)
-		}
-
-		models = append(models, mr)
-	}
-
-	slices.SortStableFunc(models, func(i, j api.ProcessModelResponse) int {
-		// longest duration remaining listed first
-		return cmp.Compare(j.ExpiresAt.Unix(), i.ExpiresAt.Unix())
-	})
-
-	c.JSON(http.StatusOK, api.ProcessResponse{Models: models})
-}
-
-func leadingBOSForModel() string {
-	return ""
-}
-
 func optionsForPrompt(opts *api.Options, runner llm.LlamaServer) *api.Options {
 	if opts == nil || runner == nil {
 		return opts
 	}
 
-	if ctxLen := runner.ContextLength(); ctxLen > 0 && opts.NumCtx > ctxLen {
+	ctxLen := runner.ContextLength() 
+	if ctxLen > 0 && opts.NumCtx > ctxLen {
 		copied := *opts
 		copied.NumCtx = ctxLen
 		return &copied
@@ -1620,25 +1071,10 @@ type chatExecutionMode int
 
 const (
 	chatExecutionModeNative chatExecutionMode = iota
-	chatExecutionModeRendered
 )
 
 func chatModeForModel(m *Model) chatExecutionMode {
 	return chatExecutionModeNative
-}
-
-func llamaServerConfigForModel(m *Model) llm.LlamaServerConfig {
-	return llm.LlamaServerConfig{
-		DisableJinja:   usesYollamaRenderedChat(m),
-	}
-}
-
-func usesYollamaRenderedChat(m *Model) bool {
-	return shouldUseGoTemplate(m)
-}
-
-func shouldUseGoTemplate(m *Model) bool {
-	return false
 }
 
 func writeChatResponse(c *gin.Context, req api.ChatRequest, ch chan any) {
@@ -1734,24 +1170,10 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	if modelRef.Source == modelSourceLocal {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", req.Model)})
-		return
-	}
-
-	// expire the runner
-	if len(req.Messages) == 0 && req.KeepAlive != nil && req.KeepAlive.Duration == 0 {
-		s.sched.expireRunner(m)
-
-		c.JSON(http.StatusOK, api.ChatResponse{
-			Model:      req.Model,
-			CreatedAt:  time.Now().UTC(),
-			Message:    api.Message{Role: "assistant"},
-			Done:       true,
-			DoneReason: "unload",
-		})
-		return
-	}
+	//if modelRef.Source == modelSourceLocal {
+	//	c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", req.Model)})
+	//	return
+	//}
 
 	capable := []model.Capability{model.CapabilityCompletion}
 	modelCaps := m.Capabilities()
@@ -1788,126 +1210,20 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	}
 
 	msgs := append(m.Messages, req.Messages...)
-	if req.Messages[0].Role != "system" && m.System != "" {
-		msgs = append([]api.Message{{Role: "system", Content: m.System}}, msgs...)
-	}
-	msgs = filterThinkTags(msgs, m)
-
-	if chatModeForModel(m) == chatExecutionModeNative {
-		s.handleNativeChat(c, req, m, r, opts, msgs)
-		return
-	}
-
-	//promptOpts := optionsForPrompt(opts, r)
-	//prompt, media, err := chatPrompt(c.Request.Context(), m, r.Tokenize, promptOpts, msgs, req.Think)
-	//if err != nil {
-	//	slog.Error("[YOLLAMA] | Chat prompt error", "error", err)
-	//	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-	//	return
+	//if chatModeForModel(m) == chatExecutionModeNative {
+	s.handleNativeChat(c, req, m, r, opts, msgs)
+	return
 	//}
 
-	// If debug mode is enabled, return the rendered template instead of calling the model
-	//if req.DebugRenderOnly {
-	//	c.JSON(http.StatusOK, api.ChatResponse{
-	//		Model:     req.Model,
-	//		CreatedAt: time.Now().UTC(),
-	//		DebugInfo: &api.DebugInfo{
-	//			RenderedTemplate: prompt,
-	//			ImageCount:       len(media),
-	//		},
-	//	})
-	//	//return
-	//}
+	//type structuredOutputsState int
+	//const (
+	//	structuredOutputsState_None structuredOutputsState = iota
+	//	structuredOutputsState_ReadyToApply
+	//	structuredOutputsState_Applying
+	//)
 
-	type structuredOutputsState int
-	const (
-		structuredOutputsState_None structuredOutputsState = iota
-		structuredOutputsState_ReadyToApply
-		structuredOutputsState_Applying
-	)
-
-	ch := make(chan any)
-	go func() {
-		defer close(ch)
-
-		//structuredOutputsState := structuredOutputsState_None
-
-		//for {
-			//var tb strings.Builder
-
-			//currentFormat := req.Format
-
-			// sets up new context given parent context per request
-			//ctx, cancel := context.WithCancel(c.Request.Context())
-			//slog.Info("[YOLLAMA] | chatHandler context cancel (status):", cancel)
-			//err := r.Completion(ctx, llm.CompletionRequest{
-			//	Prompt:          prompt,
-			//	Media:           media,
-			//	Format:          currentFormat,
-			//	Options:         opts,
-			//	Shift:           req.Shift == nil || *req.Shift,
-			//	Logprobs:        req.Logprobs,
-			//	TopLogprobs:     req.TopLogprobs,
-			//	LeadingBOS:      leadingBOSForModel(),
-			//}, func(r llm.CompletionResponse) {
-			//	res := api.ChatResponse{
-			//		Model:     req.Model,
-			//		CreatedAt: time.Now().UTC(),
-			//		Message:   api.Message{Role: "assistant", Content: r.Content},
-			//		Done:      r.Done,
-			//		Metrics: api.Metrics{
-			//			PromptEvalCount:    r.PromptEvalCount,
-			//			PromptEvalDuration: r.PromptEvalDuration,
-			//			EvalCount:          r.EvalCount,
-			//			EvalDuration:       r.EvalDuration,
-			//		},
-			//		Logprobs: toAPILogprobs(r.Logprobs),
-			//	}
-
-			//	if r.Done {
-			//		res.DoneReason = r.DoneReason.String()
-			//	}
-
-			//	ch <- res
-			//})
-			//if err != nil {
-			//	if structuredOutputsState == structuredOutputsState_ReadyToApply && strings.Contains(err.Error(), "context canceled") && c.Request.Context().Err() == nil {
-			//		// only ignores error if it's a context cancellation due to setting structured outputs
-			//	} else {
-			//		s.sched.expireRunnersForRuntimeOOM(m, err)
-			//		var serr api.StatusError
-			//		if errors.As(err, &serr) {
-			//			ch <- gin.H{"error": serr.ErrorMessage, "status": serr.StatusCode}
-			//		} else {
-			//			ch <- gin.H{"error": err.Error()}
-			//		}
-			//		return
-			//	}
-			//}
-
-			// ignored structured outputs cancellation falls through to here, start a new request with the structured outputs and updated prompt. use the
-			//if structuredOutputsState == structuredOutputsState_ReadyToApply {
-			//	structuredOutputsState = structuredOutputsState_Applying
-			//	msg := api.Message{
-			//		Role:     "assistant",
-			//		Thinking: tb.String(),
-			//	}
-
-			//	msgs = append(msgs, msg)
-			//	prompt, _, err = chatPrompt(c.Request.Context(), m, r.Tokenize, promptOpts, msgs, req.Think)
-			//	if err != nil {
-			//		slog.Error("[YOLLAMA] | Chat prompt error applying structured outputs", "error", err)
-			//		ch <- gin.H{"error": err.Error()}
-			//		return
-			//	}
-			//	continue
-			//}
-
-		//	break
-		//}
-	}()
-
-	writeChatResponse(c, req, ch)
+	//ch := make(chan any)
+	//writeChatResponse(c, req, ch)
 }
 
 func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model, r llm.LlamaServer, opts *api.Options, msgs []api.Message) {
@@ -1916,13 +1232,13 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 		Format:      req.Format,
 		Options:     opts,
 		Think:       req.Think,
-		Logprobs:    req.Logprobs,
-		TopLogprobs: req.TopLogprobs,
+		//Logprobs:    req.Logprobs,
+		//TopLogprobs: req.TopLogprobs,
 	}
 	var err error
 	nativeReq = nativeReq
 	if err != nil {
-		slog.Error("[YOLLAMA] | Chat template error", "error", err)
+		slog.Error("[YOLLAMA] | Chat error", "error", err)
 		var serr api.StatusError
 		if errors.As(err, &serr) {
 			c.JSON(serr.StatusCode, gin.H{"error": serr.ErrorMessage})
@@ -1931,29 +1247,6 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 		}
 		return
 	}
-
-	//if req.DebugRenderOnly {
-	//	prompt, err := r.ApplyChatTemplate(c.Request.Context(), nativeReq)
-	//	if err != nil {
-	//		var serr api.StatusError
-	//		if errors.As(err, &serr) {
-	//			c.JSON(serr.StatusCode, gin.H{"error": serr.ErrorMessage})
-	//		} else {
-	//			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-	//		}
-	//		return
-	//	}
-
-	//	c.JSON(http.StatusOK, api.ChatResponse{
-	//		Model:     req.Model,
-	//		CreatedAt: time.Now().UTC(),
-	//		DebugInfo: &api.DebugInfo{
-	//			RenderedTemplate: prompt,
-	//			ImageCount:       countChatImages(msgs),
-	//		},
-	//	})
-	//	//return
-	//}
 
 	ch := make(chan any)
 	go func() {
@@ -1971,11 +1264,6 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 					EvalCount:          r.EvalCount,
 					EvalDuration:       r.EvalDuration,
 				},
-				Logprobs: toAPILogprobs(r.Logprobs),
-			}
-
-			if res.Message.Role == "" {
-				res.Message.Role = "assistant"
 			}
 
 			if r.Done {
@@ -1994,7 +1282,6 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 			}
 		}
 	}()
-
 	writeChatResponse(c, req, ch)
 }
 
@@ -2019,8 +1306,4 @@ func handleScheduleError(c *gin.Context, name string, err error) {
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	}
-}
-
-func filterThinkTags(msgs []api.Message, m *Model) []api.Message {
-	return msgs
 }

@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -47,45 +48,26 @@ import (
 	"github.com/ollama/ollama/ml"
 )
 
-var grammarJSON = `
-root   ::= object
-value  ::= object | array | string | number | ("true" | "false" | "null") ws
-object ::=
-  "{" ws (
-         string ":" ws value
-    ("," ws string ":" ws value)*
-  )? ws "}"
-array  ::=
-  "[" ws (
-            value
-    ("," ws value)*
-  )? ws "]"
-string ::=
-  "\"" (
-    [^"\\\x7F\x00-\x1F] |
-    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) # escapes
-  )* "\""
-number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)?
-# Optional space: by convention, applied in this grammar after literal chars when allowed
-ws ::= ([ \t\n] ws)?
-`
-
+// DefaultModelNumBatch is the default NumBatch used for embedding models
+// when neither the model nor the request specifies num_batch.
 const (
-	openEndedGenerationContextMultiplier = 10
+	DefaultModelNumBatch             = 1024
 )
 
-func boundedNumPredict(numPredict, numCtx int) int {
-	if numCtx <= 0 {
-		return numPredict
+// DefaultModelNumBatchForContext caps the embedding batch default to the
+// active context length before it is passed to llama-server.
+func DefaultModelNumBatchForContext(numCtx int) int {
+	if numCtx > 0 {
+		return min(DefaultModelNumBatch, numCtx)
 	}
-	// Yollama's default num_predict=-1 means "generate until a stop condition".
-	// llama-server still needs a finite request budget, so keep open-ended
-	// generations bounded while allowing several full context windows.
-	limit := openEndedGenerationContextMultiplier * numCtx
-	if numPredict < 0 || numPredict > limit {
-		return limit
-	}
-	return numPredict
+	return DefaultModelNumBatch
+}
+
+// WithDefaultModelNumBatch applies the llama-server embedding batch
+// default to a copy of opts.
+func WithDefaultModelNumBatch(opts api.Options) api.Options {
+	opts.NumBatch = DefaultModelNumBatchForContext(opts.NumCtx)
+	return opts
 }
 
 // llamaServerRunner wraps an upstream llama-server process and implements the LlamaServer interface.
@@ -106,6 +88,7 @@ type llamaServerRunner struct {
 	status             *StatusWriter
 	options            api.Options
 	modelPath          string
+	mmprojMemory       uint64
 	// mediaMarker must match the LLAMA_MEDIA_MARKER value passed to llama-server.
 	// llama.cpp randomizes this by default; Yollama renders stable [img-N] markers
 	// and rewrites them before forwarding the request.
@@ -133,13 +116,13 @@ type llamaServerRunner struct {
 
 	launch                  llamaServerLaunchConfig
 	output                  *memoryParsingWriter
-	mmprojOffloadOOMRetried bool
 }
 
 type llamaServerLaunchConfig struct {
 	modelPath            string
 	projectors           []string
 	modelLayers          uint64
+	mmprojMemory         uint64
 	opts                 api.Options
 	numParallel          int
 	kvCacheType          string
@@ -148,7 +131,6 @@ type llamaServerLaunchConfig struct {
 	gpus                 []ml.DeviceInfo
 	gpuLibs              []string
 	extraEnvs            map[string]string
-	forceNoMMProjOffload bool
 }
 
 func newLlamaServerHTTPClient() *http.Client {
@@ -222,16 +204,36 @@ func newLlamaServerMediaMarker() string {
 	return fmt.Sprintf("<__yollama_media_%d_%d__>", time.Now().UnixNano(), rand.Int63())
 }
 
-func (s *llamaServerRunner) tokenizerAddsBOS() bool {
-	if s.ggml == nil {
-		return false
-	}
-
-	return s.ggml.KV().Bool("tokenizer.ggml.add_bos_token")
-}
-
 func (s *llamaServerRunner) ContextLength() int {
 	return s.options.NumCtx
+}
+
+func getLlamaPromptsPath() (string, error) {
+    // 1. Get the dynamic home directory path
+    homeUserDir, err := os.UserHomeDir()
+    if err != nil {
+        log.Fatalf("Error no such directory found: %v", err)
+    }
+
+    // 2. Safely join the home directory with the .yollama folder
+    llamaPromptPath := filepath.Join(homeUserDir, ".yollama/prompts")
+    fmt.Println("Yollama Prompts directory:", llamaPromptPath)
+
+    return llamaPromptPath, err
+}
+
+func getLlamaMediaPath() (string, error) {
+    // 1. Get the dynamic home directory path
+    homeUserDir, err := os.UserHomeDir()
+    if err != nil {
+        log.Fatalf("Error no such directory found: %v", err)
+    }
+
+    // 2. Safely join the home directory with the .yollama folder
+    llamaMediaPath := filepath.Join(homeUserDir, ".glassmorphic/.glassmorphism_media")
+    fmt.Println("Yollama Media directory:", llamaMediaPath)
+
+    return llamaMediaPath, err
 }
 
 // FindLlamaServer locates the llama-server binary in lib/yollama/.
@@ -246,6 +248,8 @@ func FindLlamaServer() (string, error) {
 
 // startLlamaServer spawns the upstream llama-server process with appropriate CLI flags.
 func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.Cmd, port int, err error) {
+	cmd = nil
+
 	exe, err := FindLlamaServer()
 	if err != nil {
 		return nil, 0, err
@@ -265,6 +269,21 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		port = 9229
 	}
 
+	pathToPrompts, err := getLlamaPromptsPath()
+    if err != nil {
+        slog.Error("[YOLLAMA] | ❌ Failed to resolve Saved-Prompts path.", "error", err)
+        return cmd, port, nil
+    } else {
+        fmt.Printf("[YOLLAMA] | ✅ Fetched Saved-Prompts path: %s\n", pathToPrompts)
+    }
+    pathToMedia, err := getLlamaMediaPath()
+    if err != nil {
+        slog.Error("[YOLLAMA] | ❌ Failed to resolve Media path.", "error", err)
+        return cmd, port, nil
+    } else {
+        fmt.Printf("[YOLLAMA] | ✅ Fetched Media path: %s\n", pathToMedia)
+    }
+
 	// NOTES: IGNORE THESE COMMENTS, they are for myself as notes only.
 	//
 	// Build CLI flags — minimal set, let llama-server auto-detect the rest
@@ -274,19 +293,17 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		"--model", launch.modelPath,
 		"--port", strconv.Itoa(port),
 		"--host", "127.0.0.1",
-		"--cache-ram", "1024",
+		"--cache-ram", "0",
 		"--no-webui",
 		"--offline",
 		"--no-warmup",
 		"--no-repack",
 		"--spec-draft-n-max", "0",
-		"--ctx-checkpoints", "2",
+		"--ctx-checkpoints", "0",
 		"--reasoning-budget", "-1",
-		"--predict", "-1",
 		"--keep", "0",
 		"--cache-reuse", "0",
 		"--no-cache-prompt",
-		"--log-colors", "on",
 		"--kv-unified",
 		"--no-context-shift",
 		"--no-cache-idle-slots",
@@ -294,69 +311,29 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		"--slot-prompt-similarity", "0.0",
 		"--threads", "12",
 		"--threads-http", "12",
-		"-c", strconv.Itoa(launch.opts.NumCtx),
-		"---parallel", strconv.Itoa(launch.numParallel),
-		"--agent",
-		 "--reasoning-format", "deepseek-legacy",
-    	"--log-prompts-dir", "/home/sera/.yollama/prompts",
-    	"--media-path", "/home/sera/.glassmorphic/.glassmorphism_media",
+		"--parallel", "2",
+		"--split-mode", "layer",
+		"-fa", "on",
+		"--fit", "on",
+		"--cache-type-k", "f16",
+		"--cache-type-v", "f16",
+		//"--agent",
+		"--reasoning-format", "deepseek-legacy",
+    	//"--video-ffmpeg-dir", "/home/sera/.glassmorphic/.glassmorphism_media",
 	}
-	params = appendLlamaServerLogArgs(params)
+
+	// Append additional params
+    params = append(params, "--log-prompts-dir", pathToPrompts)
+    params = append(params, "--media-path", pathToMedia)
+    params = append(params, "--load-mode", "mmap")
+    //params = append(params, "--mmap")
+    params = appendLlamaServerLogArgs(params)
 	params = appendJinjaArgs(params, launch.config)
-
 	params = appendMMProjArgs(params, launch)
-	//params = appendMTPDraftArgs(params, launch.config, launch.opts)
-
-	//params = append(params, qwenVLServerArgs(launch.modelArch)...)
-
-	// LoRA adapters
-	//for _, adapter := range launch.adapters {
-	//	params = append(params, "--lora", adapter)
-	//}
-
-	// Do not UseMmap
-	//if launch.opts.UseMMap != nil && !*launch.opts.UseMMap {
-	params = append(params, "--no-mmap")
-	//}
-
-
-	// Direct I/O skips the page cache on load for integrated CUDA/ROCm GPUs, which
-	// share system memory with the CPU and would otherwise double-buffer weights.
-	//for _, g := range launch.gpus {
-	//	if runtime.GOOS == "linux" && g.Integrated && (strings.EqualFold(g.Library, "CUDA") || strings.EqualFold(g.Library, "ROCm")) {
-	//		params = append(params, "--direct-io")
-	//		break
-	//	}
-	//}
-
-	// KV cache type
-	if launch.kvCacheType != "" {
-		params = append(params, "--cache-type-k", launch.kvCacheType, "--cache-type-v", launch.kvCacheType)
-	}
-
-	params = appendFlashAttentionArgs(params, launch.gpus)
-
-	params = appendBatchArgs(params, launch.opts, launch.embedding, launch.numParallel)
-
-	// GPU layer offloading — only pass if user explicitly set it (non-default).
-	// Default behavior: let llama-server auto-detect via -ngl auto.
-	//if launch.opts.NumGPU > 0 {
-	//	params = append(params, "-ngl", strconv.Itoa(launch.opts.NumGPU))
-	//} else if launch.opts.NumGPU == 0 {
-		// Explicit 0 means CPU only
-	//	params = append(params, "-ngl", "0")
-	//}
-	// NumGPU == -1 (default): don't pass -ngl, let llama-server auto-detect
-
-	// Thread count — only pass if user explicitly set it.
-	// Default behavior: let llama-server auto-detect.
-	//if launch.opts.NumThread > 0 {
-	//	params = append(params, "-t", strconv.Itoa(launch.opts.NumThread))
-	//}
-
-	//params = appendMainGPUArgs(params, launch.opts)
-
-	//params = appendContextShiftArgs(params, launch.opts, launch.config.ContextShift)
+	//params = appendFlashAttentionArgs(params, launch.gpus)
+	params = appendCtxArgs(params, launch.opts)
+	params = appendBatchArgs(params, launch.opts)
+	params = appendMediaArgs(params, launch.opts)
 
 	// Set up library paths for GPU backend discovery
 	cmd = exec.Command(exe, params...)
@@ -503,47 +480,95 @@ func appendLlamaServerLogArgs(params []string) []string {
 		"--log-verbosity", "4",
 		"--no-log-prefix",
 		"--no-log-timestamps",
+		"--log-colors", "on",
 	)
 }
 
-func appendBatchArgs(params []string, opts api.Options, embedding bool, numParallel int) []string {
-	if opts.NumBatch > 0 {
-		params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
+func appendMediaArgs(params []string, opts api.Options) []string {
+	//--image, --audio, --video FILE
+	// Hey... Hey go-lang? GO FUCK YOURSELF!
+	return params
+}
+
+// getYollamaTLSConfigPath returns the full path to the yollama_tls.conf file.
+func getYollamaCtxConfigPath() (string, error) {
+    // 1. Get the dynamic home directory path
+    homeUserDir, err := os.UserHomeDir()
+    if err != nil {
+        log.Fatalf("[YOLLAMA] | Ctx config Error: no such directory found: %v", err)
+    }
+
+    // 2. Safely join the home directory with the .yollama folder
+    ollamaPath := filepath.Join(homeUserDir, ".yollama")
+    fmt.Println("Yollama directory:", ollamaPath)
+
+    ctxConfigPath := filepath.Join(ollamaPath, "yollama_ctx.conf")
+    return ctxConfigPath, err
+}
+
+// readYollamaTLSConfig reads the config file and returns true if TLS is enabled.
+// The file should contain either 1 (true) or 0 (false).
+func readYollamaCtxConfig(ctxConfigPath string) (int, error) {
+    // Read entire file into byte slice
+    ctxConfigData, err := os.ReadFile(ctxConfigPath)
+    if err != nil {
+        return 0, fmt.Errorf("[YOLLAMA] | failed to read ctx file: %w", err)
+    }
+
+    // Convert bytes to string (trim whitespace and newlines)
+    ctxValue := strings.TrimSpace(string(ctxConfigData))
+
+    // Convert string to integer
+    numCtx_config, err := strconv.Atoi(ctxValue)
+    if err != nil {
+        return 0, fmt.Errorf("[YOLLAMA] | error converting configured Ctx value str to num")
+    }
+
+    return numCtx_config, nil
+}
+
+func appendCtxArgs(params []string, opts api.Options) []string {
+	pathCtxConfig, err := getYollamaCtxConfigPath()
+
+    if err != nil {
+        slog.Error("[YOLLAMA] | ❌ Failed to resolve Ctx config path.", "error", err)
+		return params
+    } else {
+        fmt.Printf("[YOLLAMA] | ✅ Fetched configured Ctx config path: %s\n", pathCtxConfig)
+    }
+
+	// Read the Ctx value
+    setLlamaCtx, err := readYollamaCtxConfig(pathCtxConfig)
+    if err != nil {
+        // Fail open to base default Ctx (we set 0 here for now)
+        slog.Warn("[YOLLAMA] | ⚠️ Ctx config unreadable; defaulting to static numCtx.", "error", err)
+    } else {
+      	fmt.Printf("[YOLLAMA] | ✅ Fetched configured Ctx enabled value: %t\n", setLlamaCtx)
+    }
+
+
+	if setLlamaCtx > 0 {
+		params = append(params, "-c", strconv.Itoa(setLlamaCtx))
 	} else {
-		params = append(params, "-b", strconv.Itoa(1024), "-ub", strconv.Itoa(1024))
+		setLlamaCtx = 29000 
+	params = append(params, "-c", strconv.Itoa(setLlamaCtx))
 	}
 
 	return params
 }
 
-func appendFlashAttentionArgs(params []string, gpus []ml.DeviceInfo) []string {
-	enabled := envconfig.FlashAttention(false)
-	userSet := enabled == envconfig.FlashAttention(true)
-	if userSet {
-		if enabled {
-			return append(params, "--flash-attn", "on")
-		}
-		return append(params, "--flash-attn", "off")
+func appendBatchArgs(params []string, opts api.Options) []string {
+	if opts.NumBatch > 0 {
+		params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
+	} else {
+		params = append(params, "-b", strconv.Itoa(1024), "-ub", strconv.Itoa(1024))
 	}
+	return params
+}
 
-	if !ml.FlashAttentionSupported(gpus) {
-		return append(params, "--flash-attn", "off")
-	}
+func appendFlashAttentionArgs(params []string, gpus []ml.DeviceInfo) []string {
 	return append(params, "--flash-attn", "auto")
 }
-
-func appendMainGPUArgs(params []string, opts api.Options) []string {
-	if opts.MainGPU == nil {
-		return params
-	}
-
-	return append(params, "--split-mode", "none", "--main-gpu", strconv.Itoa(*opts.MainGPU))
-}
-
-const (
-	// mmprojOffloadHeadroom leaves 1 GiB for backend buffers beyond projector weights.
-	mmprojOffloadHeadroom = 1 << 30
-)
 
 func appendMMProjArgs(params []string, launch llamaServerLaunchConfig) []string {
 	if len(launch.projectors) == 0 {
@@ -556,15 +581,51 @@ func appendMMProjArgs(params []string, launch llamaServerLaunchConfig) []string 
 
 func appendJinjaArgs(params []string, config LlamaServerConfig) []string {
 	if config.DisableJinja {
-		// Go-rendered chat paths send already-rendered prompts through completion
-		// endpoints. Override any GGUF chat template so llama-server startup
-		// does not parse an unused model template. llama-server still requires a
-		// template name, so chatml is a startup-only placeholder and must not be
-		// used for request routing.
 		return append(params, "--no-jinja", "--chat-template", "chatml")
 	}
 
 	return params
+}
+
+func mmprojMemoryRequirement(modelPath string, f *ggml.GGML, projectors []string) (uint64, error) {
+	if len(projectors) == 0 {
+		return 0, nil
+	}
+
+	if projectors[0] == modelPath {
+		if f == nil {
+			return 0, errors.New("read inline mmproj metadata: missing model metadata")
+		}
+		var size uint64
+		for _, prefix := range []string{"v.", "mm.", "a."} {
+			for _, tensor := range f.Tensors().Items(prefix) {
+				size += tensor.Size()
+			}
+		}
+		if size == 0 {
+			return 0, errors.New("read inline mmproj metadata: no projector tensors found")
+		}
+		return size, nil
+	}
+
+	file, err := os.Open(projectors[0])
+	if err != nil {
+		return 0, fmt.Errorf("read mmproj metadata %q: %w", projectors[0], err)
+	}
+	defer file.Close()
+
+	projector, err := ggml.Decode(file, 1024)
+	if err != nil {
+		return 0, fmt.Errorf("read mmproj metadata %q: %w", projectors[0], err)
+	}
+	var size uint64
+	for _, tensor := range projector.Tensors().Items() {
+		size += tensor.Size()
+	}
+	if size == 0 {
+		return 0, fmt.Errorf("read mmproj metadata %q: no projector tensors found", projectors[0])
+	}
+	return size, nil
 }
 
 // NewLlamaServerRunner creates a new llama-server runner that wraps the upstream llama-server binary.
@@ -573,6 +634,15 @@ func NewLlamaServerRunner(gpus []ml.DeviceInfo, modelPath string, f *ggml.GGML,p
 	// Check if this is an embedding model
 	arch := f.KV().Architecture()
 	_, isEmbedding := f.KV()[fmt.Sprintf("%s.pooling_type", arch)]
+
+	if len(projectors) == 0 && len(f.Tensors().Items("v.")) > 0 {
+		projectors = []string{modelPath}
+	}
+
+	mmprojMemory, err := mmprojMemoryRequirement(modelPath, f, projectors)
+	if err != nil {
+		return nil, err
+	}
 
 	gpuLibs := ml.LibraryPaths(gpus)
 	status := NewStatusWriter(os.Stderr)
@@ -587,33 +657,12 @@ func NewLlamaServerRunner(gpus []ml.DeviceInfo, modelPath string, f *ggml.GGML,p
 		serverEnvs[k] = v
 	}
 	serverEnvs["LLAMA_MEDIA_MARKER"] = mediaMarker
-/*
-	launch := llamaServerLaunchConfig{
-		modelPath:    modelPath,
-		projectors:   slices.Clone(projectors),
-		opts:         opts,
-		numParallel:  numParallel,
-		kvCacheType:  kvCacheType,
-		config:       config,
-		extraEnvs:    cloneStringMap(serverEnvs),
-	}
-
-	s := &llamaServerRunner{
-		client:           newLlamaServerHTTPClient(),
-		status:           status,
-		options:          opts,
-		modelPath:        modelPath,
-		mediaMarker:      mediaMarker,
-		launch:           launch,
-		output:           memWriter,
-	}
-	*/
 
 	launch := llamaServerLaunchConfig{
 		modelPath:    modelPath,
-//		modelArch:    arch,
 		projectors:   slices.Clone(projectors),
 		modelLayers:  f.KV().BlockCount() + 1,
+		mmprojMemory: mmprojMemory,
 		opts:         opts,
 		numParallel:  numParallel,
 		kvCacheType:  kvCacheType,
@@ -684,10 +733,7 @@ func (s *llamaServerRunner) startProcess() error {
 	return nil
 }
 
-// Load waits for llama-server to finish loading the model. llama-server loads
-// the model at startup and auto-detects GPU layers, so this just waits for
-// health to report ready. The scheduler handles full-fit preflight for
-// llama-server before this point.
+// Load waits for llama-server to finish loading the model.
 func (s *llamaServerRunner) Load(ctx context.Context, systemInfo ml.SystemInfo, gpus []ml.DeviceInfo, _ bool) ([]ml.DeviceID, error) {
 	slog.Info("loading model via llama-server", "model", s.modelPath)
 
@@ -703,10 +749,6 @@ func (s *llamaServerRunner) Load(ctx context.Context, systemInfo ml.SystemInfo, 
 			"llama-server logs. VRAM accounting will be inaccurate. This may indicate a "+
 			"change in llama-server's log format — check for 'buffer size' lines in the output.",
 			"model", s.modelPath, "gpus", len(s.gpus))
-	}
-
-	if s.options.MainGPU != nil && *s.options.MainGPU >= 0 && *s.options.MainGPU < len(gpus) {
-		return []ml.DeviceID{gpus[*s.options.MainGPU].DeviceID}, nil
 	}
 
 	// Return device IDs for all GPUs when llama-server manages layer placement itself.
@@ -746,8 +788,6 @@ func (s *llamaServerRunner) hasParsedVRAM() bool {
 	return len(s.vramByDevice) > 0
 }
 
-// getServerStatus checks llama-server's /health endpoint.
-// llama-server returns {"status":"ok"}, {"status":"loading model"}, or {"status":"error"}.
 func (s *llamaServerRunner) getServerStatus(ctx context.Context) (ServerStatus, error) {
 	if s.cmd.ProcessState != nil {
 		msg := s.lastErrMsg()
@@ -779,7 +819,6 @@ func (s *llamaServerRunner) getServerStatus(ctx context.Context) (ServerStatus, 
 		return ServerStatusError, fmt.Errorf("read health response: %w", err)
 	}
 
-	// llama-server returns {"status":"ok"}, {"status":"loading model"}, {"status":"error", ...}
 	var result struct {
 		Status string `json:"status"`
 	}
@@ -926,7 +965,7 @@ type llamaServerCompletionRequest struct {
 	NPredict        int             `json:"n_predict,omitempty"`
 	NKeep           int             `json:"n_keep,omitempty"`
 	Temperature     float32         `json:"temperature"`
-	TopK            int             `json:"top_k"`
+	TopK            float32         `json:"top_k"`
 	TopP            float32         `json:"top_p"`
 	MinP            float32         `json:"min_p"`
 	Stop            []string        `json:"stop,omitempty"`
@@ -936,54 +975,8 @@ type llamaServerCompletionRequest struct {
 	PresPenalty     float32         `json:"presence_penalty"`
 	TypicalP        float32         `json:"typical_p,omitempty"`
 	Seed            int             `json:"seed"`
-	Grammar         string          `json:"grammar,omitempty"`
 	JsonSchema      json.RawMessage `json:"json_schema,omitempty"`
 	NProbs          int             `json:"n_probs,omitempty"`
-	PreservedTokens []string        `json:"preserved_tokens,omitempty"`
-}
-
-func llamaServerPreservedTokens(parserTokens []string, toolCallTag string) []string {
-	tokens := append([]string{}, parserTokens...)
-	tokens = append(tokens, llamaServerPreservedTokensForToolTag(toolCallTag)...)
-	return tokens
-}
-
-// llama-server only preserves strings that tokenize to one special token. Some
-// Go templates use a parser tag like "[TOOL_CALLS][", where the first segment
-// is the special token and the trailing "[" is regular JSON punctuation.
-func llamaServerPreservedTokensForToolTag(tag string) []string {
-	if tag == "" || tag == "{" || tag == "[" {
-		return nil
-	}
-
-	if token := leadingSpecialTokenCandidate(tag); token != "" {
-		return []string{token}
-	}
-
-	return []string{tag}
-}
-
-func leadingSpecialTokenCandidate(tag string) string {
-	if len(tag) == 0 {
-		return ""
-	}
-
-	var close byte
-	switch tag[0] {
-	case '[':
-		close = ']'
-	case '<':
-		close = '>'
-	default:
-		return ""
-	}
-
-	end := strings.IndexByte(tag, close)
-	if end <= 0 {
-		return ""
-	}
-
-	return tag[:end+1]
 }
 
 // llamaServerMultimodalPrompt is used when images are present.
@@ -1006,15 +999,6 @@ type llamaServerChatChoice struct {
 	Delta struct {
 		Content          string `json:"content"`
 		ReasoningContent string `json:"reasoning_content"`
-		ToolCalls        []struct {
-			Index    int    `json:"index"`
-			ID       string `json:"id"`
-			Type     string `json:"type"`
-			Function struct {
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-			} `json:"function"`
-		} `json:"tool_calls"`
 	} `json:"delta"`
 	FinishReason *string `json:"finish_reason"`
 	Logprobs     struct {
@@ -1069,7 +1053,7 @@ func (s *llamaServerRunner) Completion(ctx context.Context, req CompletionReques
 	}
 	defer s.sem.Release(1)
 
-	req.Options.NumPredict = boundedNumPredict(req.Options.NumPredict, s.options.NumCtx)
+	req.Options.NumPredict = -1
 
 	status, err := s.getServerStatusRetry(ctx)
 	if err != nil {
@@ -1079,7 +1063,6 @@ func (s *llamaServerRunner) Completion(ctx context.Context, req CompletionReques
 	}
 
 	prompt := req.Prompt
-
 
 	// Build the llama-server request
 	lsReq := llamaServerCompletionRequest{
@@ -1099,29 +1082,10 @@ func (s *llamaServerRunner) Completion(ctx context.Context, req CompletionReques
 		PresPenalty:     req.Options.PresencePenalty,
 		TypicalP:        req.Options.TypicalP,
 		Seed:            req.Options.Seed,
-		PreservedTokens: llamaServerPreservedTokens(req.PreservedTokens, req.ToolCallTag),
 	}
 
 	if req.Logprobs {
 		lsReq.NProbs = max(req.TopLogprobs, 1)
-	}
-
-	// Handle format: pass JSON schema directly to llama-server, or use grammar
-	if len(req.Format) > 0 {
-		switch string(req.Format) {
-		case `null`, `""`:
-			// not set
-		case `"json"`:
-			lsReq.Grammar = grammarJSON
-		default:
-			if req.Format[0] == '{' {
-				lsReq.JsonSchema = req.Format
-			} else {
-				return fmt.Errorf("invalid format: %q; expected \"json\" or a valid JSON Schema object", req.Format)
-			}
-		}
-	} else if req.Grammar != "" {
-		lsReq.Grammar = req.Grammar
 	}
 
 	// Convert media: replace Yollama's stable [img-N] markers with the per-process
@@ -1409,7 +1373,7 @@ func (s *llamaServerRunner) ApplyChatTemplate(ctx context.Context, req ChatReque
 }
 
 func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(ChatResponse)) error {
-	slog.Debug("llama-server chat request", "messages", len(req.Messages), "tools", len(req.Tools))
+	slog.Debug("llama-server chat request", "messages", len(req.Messages))
 
 	if req.Options == nil {
 		opts := api.DefaultOptions()
@@ -1424,7 +1388,7 @@ func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(C
 	}
 	defer s.sem.Release(1)
 
-	req.Options.NumPredict = boundedNumPredict(req.Options.NumPredict, s.options.NumCtx)
+	req.Options.NumPredict = -1
 
 	status, err := s.getServerStatusRetry(ctx)
 	if err != nil {
@@ -1478,7 +1442,6 @@ func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(C
 	buf := make([]byte, 0, llamaServerStreamInitialBufferSize)
 	scanner.Buffer(buf, llamaServerStreamMaxBufferSize)
 
-	toolCalls := map[int]*llamaServerToolCallAccumulator{}
 	var finalResp ChatResponse
 	var hasFinalResp bool
 
@@ -1524,19 +1487,6 @@ func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(C
 				Logprobs: convertLogprobs(choice.Logprobs.Content, req.TopLogprobs > 0),
 			}
 
-			for _, tc := range choice.Delta.ToolCalls {
-				acc := toolCalls[tc.Index]
-				if acc == nil {
-					acc = &llamaServerToolCallAccumulator{index: tc.Index}
-					toolCalls[tc.Index] = acc
-				}
-				acc.id += tc.ID
-				if tc.Function.Name != "" {
-					acc.name += tc.Function.Name
-				}
-				acc.arguments += tc.Function.Arguments
-			}
-
 			if choice.FinishReason != nil {
 				doneReason := DoneReasonStop
 				if *choice.FinishReason == "length" {
@@ -1549,11 +1499,6 @@ func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(C
 				resp.PromptEvalDuration = time.Duration(lsResp.Timings.PromptMS * float64(time.Millisecond))
 				resp.EvalCount = lsResp.Timings.PredictN
 				resp.EvalDuration = time.Duration(lsResp.Timings.PredictMS * float64(time.Millisecond))
-				toolCalls, err := accumulatedToolCalls(toolCalls)
-				if err != nil {
-					return err
-				}
-				resp.Message.ToolCalls = toolCalls
 				finalResp = resp
 				hasFinalResp = true
 				break
@@ -1606,60 +1551,6 @@ func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(C
 	return nil
 }
 
-type llamaServerToolCallAccumulator struct {
-	index     int
-	id        string
-	name      string
-	arguments string
-}
-
-type llamaServerChatToolCall struct {
-	ID       string `json:"id,omitempty"`
-	Index    int    `json:"index"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}
-
-func accumulatedToolCalls(accs map[int]*llamaServerToolCallAccumulator) ([]api.ToolCall, error) {
-	if len(accs) == 0 {
-		return nil, nil
-	}
-
-	maxIndex := 0
-	for index := range accs {
-		maxIndex = max(maxIndex, index)
-	}
-
-	toolCalls := make([]api.ToolCall, 0, len(accs))
-	for index := 0; index <= maxIndex; index++ {
-		acc := accs[index]
-		if acc == nil {
-			continue
-		}
-
-		var args api.ToolCallFunctionArguments
-		if strings.TrimSpace(acc.arguments) != "" {
-			if err := json.Unmarshal([]byte(acc.arguments), &args); err != nil {
-				return nil, fmt.Errorf("llama-server returned invalid tool call arguments for %q: %w", acc.name, err)
-			}
-		}
-
-		toolCalls = append(toolCalls, api.ToolCall{
-			ID: acc.id,
-			Function: api.ToolCallFunction{
-				Index:     acc.index,
-				Name:      acc.name,
-				Arguments: args,
-			},
-		})
-	}
-
-	return toolCalls, nil
-}
-
 func (s *llamaServerRunner) llamaServerChatRequest(req ChatRequest, stream bool) (map[string]any, error) {
 	if req.Options == nil {
 		opts := api.DefaultOptions()
@@ -1693,9 +1584,6 @@ func (s *llamaServerRunner) llamaServerChatRequest(req ChatRequest, stream bool)
 		"typical_p":         req.Options.TypicalP,
 		"seed":              req.Options.Seed,
 	}
-	if len(req.Tools) > 0 {
-		body["tools"] = req.Tools
-	}
 	if req.Logprobs {
 		body["logprobs"] = true
 		body["top_logprobs"] = max(req.TopLogprobs, 1)
@@ -1717,19 +1605,6 @@ func (s *llamaServerRunner) llamaServerChatRequest(req ChatRequest, stream bool)
 func llamaServerChatMessage(msg Message) (map[string]any, error) {
 	converted := map[string]any{
 		"role": msg.Role,
-	}
-	if msg.ToolCallID != "" {
-		converted["tool_call_id"] = msg.ToolCallID
-	}
-	if msg.ToolName != "" {
-		converted["name"] = msg.ToolName
-	}
-	if len(msg.ToolCalls) > 0 {
-		toolCalls, err := llamaServerChatToolCalls(msg.ToolCalls)
-		if err != nil {
-			return nil, err
-		}
-		converted["tool_calls"] = toolCalls
 	}
 
 	if len(msg.Media) == 0 {
@@ -1772,54 +1647,6 @@ func llamaServerChatMediaPart(media MediaData) map[string]any {
 		"image_url": map[string]any{
 			"url": "data:" + mime + ";base64," + encoded,
 		},
-	}
-}
-
-func llamaServerChatToolCalls(tcs []api.ToolCall) ([]llamaServerChatToolCall, error) {
-	toolCalls := make([]llamaServerChatToolCall, len(tcs))
-	for i, tc := range tcs {
-		toolCalls[i].ID = tc.ID
-		toolCalls[i].Index = tc.Function.Index
-		toolCalls[i].Type = "function"
-		toolCalls[i].Function.Name = tc.Function.Name
-
-		args, err := json.Marshal(tc.Function.Arguments)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal tool call arguments for %q: %w", tc.Function.Name, err)
-		}
-		toolCalls[i].Function.Arguments = string(args)
-	}
-
-	return toolCalls, nil
-}
-
-func llamaServerChatResponseFormat(format json.RawMessage) (map[string]any, error) {
-	if len(format) == 0 {
-		return nil, nil
-	}
-
-	switch string(format) {
-	case `null`, `""`:
-		return nil, nil
-	case `"json"`:
-		return map[string]any{"type": "json_object"}, nil
-	default:
-		if format[0] != '{' {
-			return nil, fmt.Errorf("invalid format: %q; expected \"json\" or a valid JSON Schema object", format)
-		}
-
-		var schema map[string]any
-		if err := json.Unmarshal(format, &schema); err != nil {
-			return nil, fmt.Errorf("invalid format: %q; expected \"json\" or a valid JSON Schema object", format)
-		}
-
-		return map[string]any{
-			"type": "json_schema",
-			"json_schema": map[string]any{
-				"name":   "schema",
-				"schema": schema,
-			},
-		}, nil
 	}
 }
 
@@ -1928,6 +1755,36 @@ func normalizeEmbeddingError(statusCode int, body []byte) (int, string) {
 	}
 
 	return statusCode, errMsg
+}
+
+func llamaServerChatResponseFormat(format json.RawMessage) (map[string]any, error) {
+	if len(format) == 0 {
+		return nil, nil
+	}
+
+	switch string(format) {
+	case `null`, `""`:
+		return nil, nil
+	case `"json"`:
+		return map[string]any{"type": "json_object"}, nil
+	default:
+		if format[0] != '{' {
+			return nil, fmt.Errorf("invalid format: %q; expected \"json\" or a valid JSON Schema object", format)
+		}
+
+		var schema map[string]any
+		if err := json.Unmarshal(format, &schema); err != nil {
+			return nil, fmt.Errorf("invalid format: %q; expected \"json\" or a valid JSON Schema object", format)
+		}
+
+		return map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "schema",
+				"schema": schema,
+			},
+		}, nil
+	}
 }
 
 func extractLlamaServerErrorMessage(body []byte) string {
@@ -2150,12 +2007,14 @@ func (s *llamaServerRunner) MemorySize() (total, vram uint64) {
 		}
 		return total, vram
 	}
+	
 	// Fallback: use model file size as a rough proxy
 	slog.Debug("llama-server buffer sizes not available, falling back to file size estimate", "model", s.modelPath)
 	if info, err := os.Stat(s.modelPath); err == nil {
 		total = uint64(info.Size())
 		vram = total
 	}
+
 	return total, vram
 }
 

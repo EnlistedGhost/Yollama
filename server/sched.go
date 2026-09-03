@@ -35,6 +35,14 @@ type LlmRequest struct {
 	errCh           chan error
 	schedAttempts   uint
 
+	// numCtxAuto is true when NumCtx came from Yollama's automatic VRAM-tier
+	// default rather than explicit request, model, or environment config.
+	numCtxAuto bool
+
+	// numBatchAuto is true when NumBatch came from Yollama's default options
+	// rather than an explicit request or model option.
+	numBatchAuto bool
+
 	// oomRetryAttempted is set after a llama-server load crash triggers an
 	// evict-all-and-retry. Prevents infinite retry on persistent load failures.
 	oomRetryAttempted bool
@@ -111,10 +119,10 @@ func schedulerModelKey(m *Model) string {
 
 // context must be canceled to decrement ref count and release the runner
 func (s *Scheduler) GetRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration) (chan *runnerRef, chan error) {
-	return s.getRunner(c, m, opts, sessionDuration)
+	return s.getRunner(c, m, opts, sessionDuration, false, false)
 }
 
-func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration) (chan *runnerRef, chan error) {
+func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration, numCtxAuto bool, numBatchAuto bool) (chan *runnerRef, chan error) {
 
 	// Handle under-CTX cases
 	if opts.NumCtx < 1024 {
@@ -136,6 +144,8 @@ func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, ses
 		sessionDuration: sessionDuration,
 		successCh:       make(chan *runnerRef, 1),
 		errCh:           make(chan error, 1),
+		numCtxAuto:      numCtxAuto,
+		numBatchAuto:    numBatchAuto,
 	}
 
 	key := schedulerModelKey(req.model)
@@ -481,6 +491,11 @@ func readSchedLoaderBatchNumConfig(batchLoaderNumPath string) (int, error) {
 // load creates a new model based on req and loads it. If requireFull is true then the model must be loaded fully onto GPUs
 // (if any). Returns whether the scheduler needs to evict a model to make this one fit.
 func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.DeviceInfo, requireFull bool) bool {
+	//numParallel := max(int(envconfig.NumParallel()), 1)
+	//completion := req.model.CheckCapabilities(model.CapabilityCompletion) == nil
+
+	// Always load with parallel=1 
+	// (Is the resource use worth the negligible gains?)
 	numParallel := 1
 
 	sessionDuration := envconfig.KeepAlive()
@@ -533,7 +548,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 			}
 
 			launchOpts = s.applyLlamaServerLaunchConfigs(req, launchOpts, systemInfo, loadGpus, f, numParallel)
-			config := llamaServerConfigForModel(req.model)
+			config := llm.LlamaServerConfig{ DisableJinja: false, }
 			llama, err = s.newServerFn(systemInfo, loadGpus, req.model.ModelPath, f, req.model.ProjectorPaths, launchOpts, numParallel, config)
 			if err != nil {
 				// some older models are not compatible with newer versions of llama.cpp
@@ -621,6 +636,10 @@ iGPUScan:
 	}
 
 	totalSize, vramSize := llama.MemorySize()
+	effectiveNumCtx := llama.ContextLength()
+	if req.numCtxAuto && effectiveNumCtx > 0 {
+		req.opts.NumCtx = effectiveNumCtx
+	}
 	runner := &runnerRef{
 		model:           req.model,
 		modelPath:       req.model.ModelPath,
@@ -798,10 +817,7 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if !reflect.DeepEqual(runner.model.AdapterPaths, req.model.AdapterPaths) || // have the adapters changed?
-		!reflect.DeepEqual(runner.model.ProjectorPaths, req.model.ProjectorPaths) || // have the projectors changed?
-		!reflect.DeepEqual(optsExisting, optsNew) || // have the runner options changed?
-		runner.llama.Ping(ctx) != nil {
+	if !reflect.DeepEqual(runner.model.ProjectorPaths, req.model.ProjectorPaths) || !reflect.DeepEqual(optsExisting, optsNew) || runner.llama.Ping(ctx) != nil {
 		return true
 	}
 

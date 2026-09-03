@@ -156,7 +156,7 @@ type ServerStatusResponse struct {
 const (
 	llamaServerStreamInitialBufferSize = 64 * 1024
 	// llamaServerStreamMaxBufferSize bounds a single runner response stream line.
-	llamaServerStreamMaxBufferSize = 8 * format.MegaByte
+	llamaServerStreamMaxBufferSize = 16 * format.MegaByte
 )
 
 type MediaKind string
@@ -178,9 +178,6 @@ type Message struct {
 	Content    string
 	Thinking   string
 	Media      []MediaData
-	ToolCalls  []api.ToolCall
-	ToolName   string
-	ToolCallID string
 }
 
 func MessageFromAPI(msg api.Message) Message {
@@ -194,9 +191,6 @@ func MessageFromAPI(msg api.Message) Message {
 		Content:    msg.Content,
 		Thinking:   msg.Thinking,
 		Media:      media,
-		ToolCalls:  msg.ToolCalls,
-		ToolName:   msg.ToolName,
-		ToolCallID: msg.ToolCallID,
 	}
 }
 
@@ -208,7 +202,6 @@ type CompletionRequest struct {
 
 	Grammar         string // set before sending the request to the subprocess
 	PreservedTokens []string // parser tokens to render as text; ignored by non-llama-server runners
-	ToolCallTag     string   // raw generic tool parser tag, if any
 	LeadingBOS      string   // textual BOS emitted by Go rendering, if any
 
 	// Logprobs specifies whether to include log probabilities in the response
@@ -220,7 +213,6 @@ type CompletionRequest struct {
 
 type ChatRequest struct {
 	Messages []api.Message
-	Tools    api.Tools
 	Format   json.RawMessage
 	Options  *api.Options
 	Think    *api.ThinkValue

@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"regexp"
 
 	"github.com/containerd/console"
 	"github.com/mattn/go-runewidth"
@@ -175,25 +176,11 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	adapters := syncmap.NewSyncMap[string, string]()
-	adapterNames := createRequestFileNames(req.Adapters)
-	for f, digest := range req.Adapters {
-		g.Go(func() error {
-			if _, err := createBlob(cmd, client, f, digest, p); err != nil {
-				return err
-			}
-
-			adapters.Store(adapterNames[f], digest)
-			return nil
-		})
-	}
-
 	if err := g.Wait(); err != nil {
 		return err
 	}
 
 	req.Files = files.Items()
-	req.Adapters = adapters.Items()
 
 	bars := make(map[string]*progress.Bar)
 	fn := func(resp api.ProgressResponse) error {
@@ -383,7 +370,8 @@ func StopHandler(cmd *cobra.Command, args []string) error {
 		Model:     args[0],
 		KeepAlive: &api.Duration{Duration: 0},
 	}
-	if err := loadOrUnloadModel(cmd, opts); err != nil {
+	err := loadOrUnloadModel(cmd, opts)
+	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return fmt.Errorf("couldn't find model \"%s\" to stop", args[0])
 		}
@@ -402,12 +390,11 @@ func generateEmbedding(cmd *cobra.Command, modelName, input string, keepAlive *a
 		Model: modelName,
 		Input: input,
 	}
+
 	if keepAlive != nil {
 		req.KeepAlive = keepAlive
 	}
-	if truncate != nil {
-		req.Truncate = truncate
-	}
+
 	if dimensions > 0 {
 		req.Dimensions = dimensions
 	}
@@ -468,8 +455,6 @@ func hasListedModelName(models []api.ListModelResponse, name string) bool {
 }
 
 func RunHandler(cmd *cobra.Command, args []string) error {
-	interactive := true
-
 	opts := runOptions{
 		Model:       args[0],
 		WordWrap:    os.Getenv("TERM") == "xterm-256color",
@@ -538,16 +523,8 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		}
 		opts.ShowConnect = false
 		opts.WordWrap = false
-		interactive = false
 	}
 	opts.Prompt = strings.Join(prompts, " ")
-	if len(prompts) > 0 {
-		interactive = false
-	}
-	// Be quiet if we're redirecting to a pipe or file
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		interactive = false
-	}
 
 	nowrap, err := cmd.Flags().GetBool("nowordwrap")
 	if err != nil {
@@ -629,30 +606,6 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		return generateEmbedding(cmd, name, opts.Prompt, opts.KeepAlive, truncate, dimensions)
 	}
 
-	if interactive {
-		if err := loadOrUnloadModel(cmd, &opts); err != nil {
-			var sErr api.AuthorizationError
-			if errors.As(err, &sErr) && sErr.StatusCode == http.StatusUnauthorized {
-				fmt.Printf("Yollama | Error - Unauthorized!\n\n")
-				return nil
-			}
-			return err
-		}
-
-		for _, msg := range info.Messages {
-			switch msg.Role {
-			case "user":
-				fmt.Printf(">>> %s\n", msg.Content)
-			case "assistant":
-				state := &displayResponseState{}
-				displayResponse(msg.Content, opts.WordWrap, state)
-				fmt.Println()
-				fmt.Println()
-			}
-		}
-
-		return generateInteractive(cmd, opts)
-	}
 	if err := generate(cmd, opts); err != nil {
 		if handlePullUnAuthorizedError(err) {
 			return nil
@@ -1167,6 +1120,8 @@ type runOptions struct {
 	Format         string
 	System         string
 	Images         []api.ImageData
+	//Audios         []api.AudioData
+	//Videos         []api.VideoData
 	Options        map[string]any
 	MultiModal     bool
 	KeepAlive      *api.Duration
@@ -1193,6 +1148,19 @@ func (r runOptions) Copy() runOptions {
 		images = make([]api.ImageData, len(r.Images))
 		copy(images, r.Images)
 	}
+/*
+	var Audios []api.AudioData
+	if r.Audios != nil {
+		audios = make([]api.AudioData, len(r.Audios))
+		copy(audios, r.Audios)
+	}
+
+	var Videos []api.VideoData
+	if r.Videos != nil {
+		videos = make([]api.VideoData, len(r.Videos))
+		copy(videos, r.Videos)
+	}
+*/
 
 	var opts map[string]any
 	if r.Options != nil {
@@ -1218,6 +1186,8 @@ func (r runOptions) Copy() runOptions {
 		Format:         r.Format,
 		System:         r.System,
 		Images:         images,
+		//Audios:			audios,
+		//Videos:		videos,
 		Options:        opts,
 		MultiModal:     r.MultiModal,
 		KeepAlive:      r.KeepAlive,
@@ -1404,6 +1374,107 @@ func chat(cmd *cobra.Command, opts runOptions) (*api.Message, error) {
 	return &api.Message{Role: role, Thinking: thinkingContent.String(), Content: fullResponse.String()}, nil
 }
 
+func normalizeFilePath(fp string) string {
+	return strings.NewReplacer(
+		"\\ ", " ", // Escaped space
+		"\\(", "(", // Escaped left parenthesis
+		"\\)", ")", // Escaped right parenthesis
+		"\\[", "[", // Escaped left square bracket
+		"\\]", "]", // Escaped right square bracket
+		"\\{", "{", // Escaped left curly brace
+		"\\}", "}", // Escaped right curly brace
+		"\\$", "$", // Escaped dollar sign
+		"\\&", "&", // Escaped ampersand
+		"\\;", ";", // Escaped semicolon
+		"\\'", "'", // Escaped single quote
+		"\\\\", "\\", // Escaped backslash
+		"\\*", "*", // Escaped asterisk
+		"\\?", "?", // Escaped question mark
+		"\\~", "~", // Escaped tilde
+	).Replace(fp)
+}
+
+func extractFileNames(input string) []string {
+	// Regex to match file paths starting with optional drive letter, / ./ \ or .\ and include escaped or unescaped spaces (\ or %20)
+	// and followed by more characters and a file extension
+	// This will capture non filename strings, but we'll check for file existence to remove mismatches
+	regexPattern := `(?:[a-zA-Z]:)?(?:\./|/|\\)[\S\\ ]+?\.(?i:jpg|jpeg|png|webp|wav)\b`
+	re := regexp.MustCompile(regexPattern)
+
+	return re.FindAllString(input, -1)
+}
+
+func extractFileData(input string) (string, []api.ImageData, error) {
+	filePaths := extractFileNames(input)
+	var imgs []api.ImageData
+
+	for _, fp := range filePaths {
+		nfp := normalizeFilePath(fp)
+		data, err := getImageData(nfp)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			fmt.Fprintf(os.Stderr, "Couldn't process file: %q\n", err)
+			return "", imgs, err
+		}
+		ext := strings.ToLower(filepath.Ext(nfp))
+		switch ext {
+		case ".wav":
+			fmt.Fprintf(os.Stderr, "Added audio '%s'\n", nfp)
+		default:
+			fmt.Fprintf(os.Stderr, "Added image '%s'\n", nfp)
+		}
+		input = strings.ReplaceAll(input, "'"+nfp+"'", "")
+		input = strings.ReplaceAll(input, "'"+fp+"'", "")
+		input = strings.ReplaceAll(input, fp, "")
+		imgs = append(imgs, data)
+	}
+	return strings.TrimSpace(input), imgs, nil
+}
+
+func getImageData(filePath string) ([]byte, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	buf := make([]byte, 512)
+	_, err = file.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	contentType := http.DetectContentType(buf)
+	allowedTypes := []string{"image/jpeg", "image/jpg", "image/png", "image/webp", "audio/wave"}
+	if !slices.Contains(allowedTypes, contentType) {
+		return nil, fmt.Errorf("invalid file type: %s", contentType)
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	var maxSize int64 = 100 * 1024 * 1024 // 100MB
+	if info.Size() > maxSize {
+		return nil, errors.New("file size exceeds maximum limit (100MB)")
+	}
+
+	buf = make([]byte, info.Size())
+	_, err = file.Seek(0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = io.ReadFull(file, buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf, nil
+}
+
 func generate(cmd *cobra.Command, opts runOptions) error {
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
@@ -1443,9 +1514,9 @@ func generate(cmd *cobra.Command, opts runOptions) error {
 		latest = response
 		content := response.Response
 
-		//if response.Response != "" {
-		//	p.StopAndClear()
-		//}
+		if response.Response != "" {
+			p.StopAndClear()
+		}
 
 		if response.Thinking != "" {
 			if !thinkTagOpened {
@@ -1675,72 +1746,6 @@ func ensureServerRunning(ctx context.Context) error {
 	}
 }
 
-func launchInteractiveModel(cmd *cobra.Command, modelName string) error {
-	opts := runOptions{
-		Model:       modelName,
-		WordWrap:    os.Getenv("TERM") == "xterm-256color",
-		Options:     map[string]any{},
-		ShowConnect: true,
-	}
-
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	info, err := func() (*api.ShowResponse, error) {
-		showReq := &api.ShowRequest{Name: modelName}
-		info, err := client.Show(cmd.Context(), showReq)
-		var se api.StatusError
-		if errors.As(err, &se) && se.StatusCode == http.StatusNotFound {
-			if err := PullHandler(cmd, []string{modelName}); err != nil {
-				return nil, err
-			}
-			return client.Show(cmd.Context(), &api.ShowRequest{Name: modelName})
-		}
-		return info, err
-	}()
-	if err != nil {
-		if handlePullUnAuthorizedError(err) {
-			return nil
-		}
-		return err
-	}
-
-	ensureRemotePullStub(cmd.Context(), client, modelName)
-
-	opts.Think, err = inferThinkingOption(&info.Capabilities, &opts, false)
-	if err != nil {
-		return err
-	}
-
-	audioCapable := slices.Contains(info.Capabilities, model.CapabilityAudio)
-	opts.MultiModal = slices.Contains(info.Capabilities, model.CapabilityVision) || audioCapable
-
-	// TODO: remove the projector info and vision info checks below,
-	// these are left in for backwards compatibility with older servers
-	// that don't have the capabilities field in the model info
-	if len(info.ProjectorInfo) != 0 {
-		opts.MultiModal = true
-	}
-	for k := range info.ModelInfo {
-		if strings.Contains(k, ".vision.") {
-			opts.MultiModal = true
-			break
-		}
-	}
-
-	applyShowResponseToRunOptions(&opts, info)
-
-	if err := loadOrUnloadModel(cmd, &opts); err != nil {
-		return fmt.Errorf("error loading model: %w", err)
-	}
-	if err := generateInteractive(cmd, opts); err != nil {
-		return fmt.Errorf("error running model: %w", err)
-	}
-	return nil
-}
-
 func NewCLI() *cobra.Command {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	cobra.EnableCommandSorting = false
@@ -1948,13 +1953,6 @@ func NewCLI() *cobra.Command {
 	return rootCmd
 }
 
-// If the user has explicitly set thinking options, either through the CLI or
-// through the `/set think` or `set nothink` interactive options, then we
-// respect them. Otherwise, we check model capabilities to see if the model
-// supports thinking. If the model does support thinking, we enable it.
-// Otherwise, we unset the thinking option (which is different than setting it
-// to false).
-//
 // If capabilities are not provided, we fetch them from the server.
 func inferThinkingOption(caps *[]model.Capability, runOpts *runOptions, explicitlySetByUser bool) (*api.ThinkValue, error) {
 	if explicitlySetByUser {

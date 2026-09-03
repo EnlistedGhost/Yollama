@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"iter"
 	"log/slog"
 	"math"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/internal/orderedmap"
 	"github.com/ollama/ollama/types/model"
 )
 
@@ -125,20 +123,6 @@ type GenerateRequest struct {
 	// each with an associated log probability. Only applies when Logprobs is true.
 	// Valid values are 0-20. Default is 0 (only return the selected token's logprob).
 	TopLogprobs int `json:"top_logprobs,omitempty"`
-
-	// Experimental: Image generation fields (may change or be removed)
-
-	// Width is the width of the generated image in pixels.
-	// Only used for image generation models.
-	Width int32 `json:"width,omitempty"`
-
-	// Height is the height of the generated image in pixels.
-	// Only used for image generation models.
-	Height int32 `json:"height,omitempty"`
-
-	// Steps is the number of diffusion steps for image generation.
-	// Only used for image generation models.
-	Steps int32 `json:"steps,omitempty"`
 }
 
 // ChatRequest describes a request sent by [Client.Chat].
@@ -159,9 +143,6 @@ type ChatRequest struct {
 	// following the request.
 	KeepAlive *Duration `json:"keep_alive,omitempty"`
 
-	// Tools is an optional list of tools the model has access to.
-	Tools `json:"tools,omitempty"`
-
 	// Options lists model-specific options.
 	Options map[string]any `json:"options"`
 
@@ -170,18 +151,6 @@ type ChatRequest struct {
 	// for supported models.
 	Think *ThinkValue `json:"think,omitempty"`
 
-	// Truncate is a boolean that, when set to true, truncates the chat history messages
-	// if the rendered prompt exceeds the context length limit.
-	Truncate *bool `json:"truncate,omitempty"`
-
-	// Shift is a boolean that, when set to true, shifts the chat history
-	// when hitting the context length limit instead of erroring.
-	Shift *bool `json:"shift,omitempty"`
-
-	// DebugRenderOnly is a debug option that, when set to true, returns the rendered
-	// template instead of calling the model.
-	DebugRenderOnly bool `json:"_debug_render_only,omitempty"`
-
 	// Logprobs specifies whether to return log probabilities of the output tokens.
 	Logprobs bool `json:"logprobs,omitempty"`
 
@@ -189,18 +158,6 @@ type ChatRequest struct {
 	// each with an associated log probability. Only applies when Logprobs is true.
 	// Valid values are 0-20. Default is 0 (only return the selected token's logprob).
 	TopLogprobs int `json:"top_logprobs,omitempty"`
-}
-
-type Tools []Tool
-
-func (t Tools) String() string {
-	bts, _ := json.Marshal(t)
-	return string(bts)
-}
-
-func (t Tool) String() string {
-	bts, _ := json.Marshal(t)
-	return string(bts)
 }
 
 // Message is a single message in a chat sequence. The message contains the
@@ -213,9 +170,6 @@ type Message struct {
 	// original model output when ChatRequest.Think is enabled.
 	Thinking   string      `json:"thinking,omitempty"`
 	Images     []ImageData `json:"images,omitempty"`
-	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
-	ToolName   string      `json:"tool_name,omitempty"`
-	ToolCallID string      `json:"tool_call_id,omitempty"`
 }
 
 func (m *Message) UnmarshalJSON(b []byte) error {
@@ -228,95 +182,6 @@ func (m *Message) UnmarshalJSON(b []byte) error {
 	*m = Message(a)
 	m.Role = strings.ToLower(m.Role)
 	return nil
-}
-
-type ToolCall struct {
-	ID       string           `json:"id,omitempty"`
-	Function ToolCallFunction `json:"function"`
-}
-
-type ToolCallFunction struct {
-	Index     int                       `json:"index"`
-	Name      string                    `json:"name"`
-	Arguments ToolCallFunctionArguments `json:"arguments"`
-}
-
-// ToolCallFunctionArguments holds tool call arguments in insertion order.
-type ToolCallFunctionArguments struct {
-	om *orderedmap.Map[string, any]
-}
-
-// NewToolCallFunctionArguments creates a new empty ToolCallFunctionArguments.
-func NewToolCallFunctionArguments() ToolCallFunctionArguments {
-	return ToolCallFunctionArguments{om: orderedmap.New[string, any]()}
-}
-
-// Get retrieves a value by key.
-func (t *ToolCallFunctionArguments) Get(key string) (any, bool) {
-	if t == nil || t.om == nil {
-		return nil, false
-	}
-	return t.om.Get(key)
-}
-
-// Set sets a key-value pair, preserving insertion order.
-func (t *ToolCallFunctionArguments) Set(key string, value any) {
-	if t == nil {
-		return
-	}
-	if t.om == nil {
-		t.om = orderedmap.New[string, any]()
-	}
-	t.om.Set(key, value)
-}
-
-// Len returns the number of arguments.
-func (t *ToolCallFunctionArguments) Len() int {
-	if t == nil || t.om == nil {
-		return 0
-	}
-	return t.om.Len()
-}
-
-// All returns an iterator over all key-value pairs in insertion order.
-func (t *ToolCallFunctionArguments) All() iter.Seq2[string, any] {
-	if t == nil || t.om == nil {
-		return func(yield func(string, any) bool) {}
-	}
-	return t.om.All()
-}
-
-// ToMap returns a regular map (order not preserved).
-func (t *ToolCallFunctionArguments) ToMap() map[string]any {
-	if t == nil || t.om == nil {
-		return nil
-	}
-	return t.om.ToMap()
-}
-
-func (t *ToolCallFunctionArguments) String() string {
-	if t == nil || t.om == nil {
-		return "{}"
-	}
-	bts, _ := json.Marshal(t.om)
-	return string(bts)
-}
-
-func (t *ToolCallFunctionArguments) UnmarshalJSON(data []byte) error {
-	t.om = orderedmap.New[string, any]()
-	return json.Unmarshal(data, t.om)
-}
-
-func (t ToolCallFunctionArguments) MarshalJSON() ([]byte, error) {
-	if t.om == nil {
-		return []byte("{}"), nil
-	}
-	return json.Marshal(t.om)
-}
-
-type Tool struct {
-	Type     string       `json:"type"`
-	Items    any          `json:"items,omitempty"`
 }
 
 // PropertyType can be either a string or an array of strings
@@ -359,106 +224,6 @@ func (pt PropertyType) String() string {
 		return pt[0]
 	}
 	return fmt.Sprintf("%v", []string(pt))
-}
-
-// ToolPropertiesMap holds tool properties in insertion order.
-type ToolPropertiesMap struct {
-	om *orderedmap.Map[string, ToolProperty]
-}
-
-// NewToolPropertiesMap creates a new empty ToolPropertiesMap.
-func NewToolPropertiesMap() *ToolPropertiesMap {
-	return &ToolPropertiesMap{om: orderedmap.New[string, ToolProperty]()}
-}
-
-// Get retrieves a property by name.
-func (t *ToolPropertiesMap) Get(key string) (ToolProperty, bool) {
-	if t == nil || t.om == nil {
-		return ToolProperty{}, false
-	}
-	return t.om.Get(key)
-}
-
-// Set sets a property, preserving insertion order.
-func (t *ToolPropertiesMap) Set(key string, value ToolProperty) {
-	if t == nil {
-		return
-	}
-	if t.om == nil {
-		t.om = orderedmap.New[string, ToolProperty]()
-	}
-	t.om.Set(key, value)
-}
-
-// Len returns the number of properties.
-func (t *ToolPropertiesMap) Len() int {
-	if t == nil || t.om == nil {
-		return 0
-	}
-	return t.om.Len()
-}
-
-// All returns an iterator over all properties in insertion order.
-func (t *ToolPropertiesMap) All() iter.Seq2[string, ToolProperty] {
-	if t == nil || t.om == nil {
-		return func(yield func(string, ToolProperty) bool) {}
-	}
-	return t.om.All()
-}
-
-// ToMap returns a regular map (order not preserved).
-func (t *ToolPropertiesMap) ToMap() map[string]ToolProperty {
-	if t == nil || t.om == nil {
-		return nil
-	}
-	return t.om.ToMap()
-}
-
-func (t ToolPropertiesMap) MarshalJSON() ([]byte, error) {
-	if t.om == nil {
-		return []byte("null"), nil
-	}
-	return json.Marshal(t.om)
-}
-
-func (t *ToolPropertiesMap) UnmarshalJSON(data []byte) error {
-	t.om = orderedmap.New[string, ToolProperty]()
-	return json.Unmarshal(data, t.om)
-}
-
-type ToolProperty struct {
-	AnyOf       []ToolProperty     `json:"anyOf,omitempty"`
-	Type        PropertyType       `json:"type,omitempty"`
-	Items       any                `json:"items,omitempty"`
-	Description string             `json:"description,omitempty"`
-	Enum        []any              `json:"enum,omitempty"`
-	Properties  *ToolPropertiesMap `json:"properties,omitempty"`
-	Required    []string           `json:"required,omitempty"`
-}
-
-// ToTypeScriptType converts a ToolProperty to a TypeScript type string
-func (tp ToolProperty) ToTypeScriptType() string {
-	if len(tp.AnyOf) > 0 {
-		var types []string
-		for _, anyOf := range tp.AnyOf {
-			types = append(types, anyOf.ToTypeScriptType())
-		}
-		return strings.Join(types, " | ")
-	}
-
-	if len(tp.Type) == 0 {
-		return "any"
-	}
-
-	if len(tp.Type) == 1 {
-		return mapToTypeScriptType(tp.Type[0])
-	}
-
-	var types []string
-	for _, t := range tp.Type {
-		types = append(types, mapToTypeScriptType(t))
-	}
-	return strings.Join(types, " | ")
 }
 
 // mapToTypeScriptType maps JSON Schema types to TypeScript types
@@ -553,7 +318,7 @@ type Options struct {
 	NumKeep          int      `json:"num_keep,omitempty"`
 	Seed             int      `json:"seed,omitempty"`
 	NumPredict       int      `json:"num_predict,omitempty"`
-	TopK             int      `json:"top_k,omitempty"`
+	TopK             float32  `json:"top_k,omitempty"`
 	TopP             float32  `json:"top_p,omitempty"`
 	MinP             float32  `json:"min_p,omitempty"`
 	TypicalP         float32  `json:"typical_p,omitempty"`
@@ -573,7 +338,6 @@ type Runner struct {
 	MainGPU         *int  `json:"main_gpu,omitempty"`
 	UseMMap         *bool `json:"use_mmap,omitempty"`
 	NumThread       int   `json:"num_thread,omitempty"`
-	DraftNumPredict int   `json:"draft_num_predict,0"`
 }
 
 // EmbedRequest is the request passed to [Client.Embed].
@@ -587,9 +351,6 @@ type EmbedRequest struct {
 	// KeepAlive controls how long the model will stay loaded in memory following
 	// this request.
 	KeepAlive *Duration `json:"keep_alive,omitempty"`
-
-	// Truncate truncates the input to fit the model's max sequence length.
-	Truncate *bool `json:"truncate,omitempty"`
 
 	// Dimensions truncates the output embedding to the specified dimension.
 	Dimensions int `json:"dimensions,omitempty"`
@@ -642,9 +403,6 @@ type CreateRequest struct {
 
 	// From is the name of the model or file to use as the source.
 	From string `json:"from,omitempty"`
-
-	// RemoteHost is the URL of the upstream yollama API for the model (if any).
-	RemoteHost string `json:"remote_host,omitempty"`
 
 	// Files is a map of files include when creating the model.
 	Files map[string]string `json:"files,omitempty"`
@@ -786,16 +544,6 @@ type ProcessModelResponse struct {
 
 type TokenResponse struct {
 	Token string `json:"token"`
-}
-
-type CloudStatus struct {
-	Disabled bool   `json:"disabled"`
-	Source   string `json:"source"`
-}
-
-// StatusResponse is the response from [Client.CloudStatusExperimental].
-type StatusResponse struct {
-	Cloud CloudStatus `json:"cloud"`
 }
 
 // GenerateResponse is the response passed into [GenerateResponseFunc].
@@ -1000,7 +748,7 @@ func DefaultOptions() Options {
 		// set baseline options
 		NumKeep:          0,
 		Temperature:      1.25,
-		TopK:             95,
+		TopK:             95.8205,
 		TopP:             0.7905,
 		MinP:			  0.5207,
 		TypicalP:         1.0,
@@ -1014,7 +762,6 @@ func DefaultOptions() Options {
 			// options set when the model is loaded
 			NumCtx:          int(envconfig.ContextLength()),
 			NumBatch:        1024,
-			DraftNumPredict: 0,
 			NumGPU:          -1, // -1 here indicates that NumGPU should be set dynamically
 			NumThread:       0,  // let the runtime decide
 			UseMMap:         nil,

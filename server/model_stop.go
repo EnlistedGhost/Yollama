@@ -20,7 +20,7 @@ func (s *Server) StopModelHandler(c *gin.Context) {
 		return
 	}
 
-	model, err := GetModel(req.Model)
+	model, err := CheckForModel(req.Model)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Model not found in system manifest"})
 		return

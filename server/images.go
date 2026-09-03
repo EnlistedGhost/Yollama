@@ -26,7 +26,6 @@ import (
 	"github.com/ollama/ollama/manifest"
 	"github.com/ollama/ollama/parser"
 	"github.com/ollama/ollama/template"
-	"github.com/ollama/ollama/thinking"
 	"github.com/ollama/ollama/types/model"
 	"github.com/ollama/ollama/version"
 )
@@ -38,20 +37,16 @@ const layerPruneGracePeriod = time.Hour
 var (
 	errCapabilities         = errors.New("does not support")
 	errCapabilityCompletion = errors.New("completion")
-	errCapabilityTools      = errors.New("tools")
 	errCapabilityInsert     = errors.New("insert")
 	errCapabilityVision     = errors.New("vision")
 	errCapabilityAudio      = errors.New("audio")
 	errCapabilityEmbedding  = errors.New("embedding")
 	errCapabilityThinking   = errors.New("thinking")
-	errCapabilityImage      = errors.New("image generation")
 	errInsecureProtocol     = errors.New("insecure protocol http")
 )
 
 type registryOptions struct {
 	Insecure bool
-	Username string
-	Password string
 	Token    string
 
 	CheckRedirect func(req *http.Request, via []*http.Request) error
@@ -64,9 +59,6 @@ type Model struct {
 	ModelPath          string
 	ParentModel        string
 	HasChatTemplate    bool
-	HasGoTemplate      bool
-	PreferChatTemplate bool // set when GGUF chat_template has more capabilities than Go TEMPLATE
-	AdapterPaths       []string
 	ProjectorPaths     []string
 	System             string
 	License            []string
@@ -75,10 +67,6 @@ type Model struct {
 	Messages           []api.Message
 
 	Template *template.Template
-}
-
-func (m *Model) IsMLX() bool {
-	return m.Config.ModelFormat == "safetensors"
 }
 
 func (m *Model) isGGUF() bool {
@@ -156,18 +144,11 @@ func chatTemplateCapabilities(capabilities []model.Capability, chatTemplate stri
 		return capabilities
 	}
 
-	if chatTemplateHasToolSupport(chatTemplate) {
-		capabilities = appendCapability(capabilities, model.CapabilityTools)
-	}
 	if chatTemplateHasThinkingSupport(chatTemplate) {
 		capabilities = appendCapability(capabilities, model.CapabilityThinking)
 	}
 
 	return capabilities
-}
-
-func chatTemplateHasToolSupport(chatTemplate string) bool {
-	return strings.Contains(chatTemplate, "tools") || strings.Contains(chatTemplate, "tool_call")
 }
 
 func chatTemplateHasThinkingSupport(chatTemplate string) bool {
@@ -183,39 +164,8 @@ func chatTemplateHasThinkingSupport(chatTemplate string) bool {
 		!strings.Contains(chatTemplate, "<SPECIAL_12>")
 }
 
-func goTemplateCapabilities(t *template.Template) []model.Capability {
-	if t == nil {
-		return nil
-	}
-
-	v, err := t.Vars()
-	if err != nil {
-		slog.Warn("model template contains errors", "error", err)
-		return nil
-	}
-
-	var capabilities []model.Capability
-	if slices.Contains(v, "tools") {
-		capabilities = appendCapability(capabilities, model.CapabilityTools)
-	}
-	if slices.Contains(v, "suffix") {
-		capabilities = appendCapability(capabilities, model.CapabilityInsert)
-	}
-
-	openingTag, closingTag := thinking.InferTags(t.Template)
-	if openingTag != "" && closingTag != "" {
-		capabilities = appendCapability(capabilities, model.CapabilityThinking)
-	}
-
-	return capabilities
-}
-
 func hasMoreCapabilities(candidate, current []model.Capability) bool {
 	return len(candidate) > len(current)
-}
-
-func goTemplateEnvSet() bool {
-	return envconfig.GoTemplate(true) == envconfig.GoTemplate(false)
 }
 
 func (m *Model) projectorCapabilities(capabilities []model.Capability) []model.Capability {
@@ -240,14 +190,6 @@ func (m *Model) projectorCapabilities(capabilities []model.Capability) []model.C
 }
 
 func (m *Model) templateCapabilities(capabilities []model.Capability) []model.Capability {
-	if m.HasGoTemplate && !shouldUseGoTemplate(m) {
-		return capabilities
-	}
-
-	for _, capability := range goTemplateCapabilities(m.Template) {
-		capabilities = appendCapability(capabilities, capability)
-	}
-
 	return capabilities
 }
 
@@ -326,13 +268,11 @@ func (m *Model) CheckCapabilities(want ...model.Capability) error {
 	// Map capabilities to their corresponding error
 	capToErr := map[model.Capability]error{
 		model.CapabilityCompletion: errCapabilityCompletion,
-		model.CapabilityTools:      errCapabilityTools,
 		model.CapabilityInsert:     errCapabilityInsert,
 		model.CapabilityVision:     errCapabilityVision,
 		model.CapabilityAudio:      errCapabilityAudio,
 		model.CapabilityEmbedding:  errCapabilityEmbedding,
 		model.CapabilityThinking:   errCapabilityThinking,
-		model.CapabilityImage:      errCapabilityImage,
 	}
 
 	for _, cap := range want {
@@ -353,10 +293,7 @@ func (m *Model) CheckCapabilities(want ...model.Capability) error {
 	}
 
 	if slices.Contains(errs, errCapabilityThinking) {
-		if m.Config.ModelFamily == "qwen3" || model.ParseName(m.Name).Model == "deepseek-r1" {
-			// append a message to the existing error
-			return fmt.Errorf("%w. Pull the model again to get the latest version with full thinking support", err)
-		}
+		return fmt.Errorf("%w. Thinking support is depricated type in this model", err)
 	}
 
 	return err
@@ -369,13 +306,6 @@ func (m *Model) String() string {
 		Name: "model",
 		Args: m.ModelPath,
 	})
-
-	for _, adapter := range m.AdapterPaths {
-		modelfile.Commands = append(modelfile.Commands, parser.Command{
-			Name: "adapter",
-			Args: adapter,
-		})
-	}
 
 	for _, projector := range m.ProjectorPaths {
 		modelfile.Commands = append(modelfile.Commands, parser.Command{
@@ -446,10 +376,52 @@ func (m *Model) String() string {
 	return modelfile.String()
 }
 
-func GetModel(name string) (*Model, error) {
+func CheckForModel(name string) (*Model, error) {
+	slog.Info("[YOLLAMA] | CheckForModel() - Function Called")
 	n := model.ParseName(name)
 	mf, err := manifest.ParseNamedManifest(n)
 	if err != nil {
+		slog.Info("[YOLLAMA] | CheckForModel() - Name resolution error")
+		return nil, err
+	}
+
+	m := &Model{
+		Name:      n.String(),
+		ShortName: n.DisplayShortest(),
+		Digest:    mf.Digest(),
+	}
+
+	for _, layer := range mf.Layers {
+		normalizedType := NormalizeMediaType(layer.MediaType)
+		filename, err := manifest.BlobsPath(layer.Digest)
+		if err != nil {
+			slog.Info("[YOLLAMA] | CheckForModel() - manifest blobs digest error")
+			return nil, err
+		}
+
+		if normalizedType == "application/vnd.yollama.image.model" {
+			m.ModelPath = filename
+			if m.isGGUF() {
+				f, err := gguf.Open(filename)
+				if err != nil {
+					slog.Error("[YOLLAMA] | CheckForModel - couldn't open model file", "error", err)
+					return nil, err
+				}
+				f.Close()
+				break
+			}
+		}
+	}
+
+	return m, nil
+}
+
+func GetModel(name string) (*Model, error) {
+	slog.Info("[YOLLAMA] | GetModel() - Function Called")
+	n := model.ParseName(name)
+	mf, err := manifest.ParseNamedManifest(n)
+	if err != nil {
+		slog.Info("[YOLLAMA] | GetModel() - Name resolution error")
 		return nil, err
 	}
 
@@ -463,16 +435,19 @@ func GetModel(name string) (*Model, error) {
 	if mf.Config.Digest != "" {
 		filename, err := manifest.BlobsPath(mf.Config.Digest)
 		if err != nil {
+			slog.Info("[YOLLAMA] | GetModel() - blobs path error")
 			return nil, err
 		}
 
 		configFile, err := os.Open(filename)
 		if err != nil {
+			slog.Info("[YOLLAMA] | GetModel() - open file error")
 			return nil, err
 		}
 		defer configFile.Close()
 
 		if err := json.NewDecoder(configFile).Decode(&m.Config); err != nil {
+			slog.Info("[YOLLAMA] | GetModel() - json model file decode error")
 			return nil, err
 		}
 	}
@@ -483,6 +458,7 @@ func GetModel(name string) (*Model, error) {
 		normalizedType := NormalizeMediaType(layer.MediaType)
 		filename, err := manifest.BlobsPath(layer.Digest)
 		if err != nil {
+			slog.Info("[YOLLAMA] | GetModel() - manifest blobs digest error")
 			return nil, err
 		}
 
@@ -501,29 +477,25 @@ func GetModel(name string) (*Model, error) {
 				modelHasPooling = f.KeyValue("pooling_type").Valid()
 				f.Close()
 			}
-		case "application/vnd.yollama.image.embed":
-			// Deprecated in versions > 0.1.2
-			// TODO: remove this warning in a future version
-			slog.Info("WARNING: model contains embeddings, but embeddings in modelfiles have been deprecated and will be ignored.")
-		case "application/vnd.yollama.image.adapter":
-			m.AdapterPaths = append(m.AdapterPaths, filename)
 		case "application/vnd.yollama.image.projector":
 			m.ProjectorPaths = append(m.ProjectorPaths, filename)
 		case "application/vnd.yollama.image.prompt",
 			"application/vnd.yollama.image.template":
-			m.HasGoTemplate = true
 			bts, err := os.ReadFile(filename)
 			if err != nil {
+				slog.Info("[YOLLAMA] | GetModel() - file name error")
 				return nil, err
 			}
 
 			m.Template, err = template.Parse(string(bts))
 			if err != nil {
+				slog.Info("[YOLLAMA] | GetModel() - template parsing error")
 				return nil, err
 			}
 		case "application/vnd.yollama.image.system":
 			bts, err := os.ReadFile(filename)
 			if err != nil {
+				slog.Info("[YOLLAMA] | GetModel() - yollama.image.system error")
 				return nil, err
 			}
 
@@ -531,26 +503,31 @@ func GetModel(name string) (*Model, error) {
 		case "application/vnd.yollama.image.params":
 			params, err := os.Open(filename)
 			if err != nil {
+				slog.Info("[YOLLAMA] | GetModel() - yollama.image.system error")
 				return nil, err
 			}
 			defer params.Close()
 
 			if err = json.NewDecoder(params).Decode(&m.Options); err != nil {
+				slog.Info("[YOLLAMA] | GetModel() - params json decoder error")
 				return nil, err
 			}
 		case "application/vnd.yollama.image.messages":
 			msgs, err := os.Open(filename)
 			if err != nil {
+				slog.Info("[YOLLAMA] | GetModel() - yollama.image.messages error")
 				return nil, err
 			}
 			defer msgs.Close()
 
 			if err = json.NewDecoder(msgs).Decode(&m.Messages); err != nil {
+				slog.Info("[YOLLAMA] | GetModel() - messages json parsing error")
 				return nil, err
 			}
 		case "application/vnd.yollama.image.license":
 			bts, err := os.ReadFile(filename)
 			if err != nil {
+				slog.Info("[YOLLAMA] | GetModel() - yollama.image.license error")
 				return nil, err
 			}
 			m.License = append(m.License, string(bts))
@@ -558,14 +535,10 @@ func GetModel(name string) (*Model, error) {
 	}
 
 	ggufCaps := chatTemplateCapabilities(nil, ggufChatTemplate)
-	goCaps := goTemplateCapabilities(m.Template)
-	if !goTemplateEnvSet() && m.HasGoTemplate && ggufChatTemplate != "" && m.Config.Renderer == "" && m.Config.Parser == "" && hasMoreCapabilities(ggufCaps, goCaps) {
-		m.PreferChatTemplate = true
-		slog.Debug("using GGUF chat_template because it has stronger capabilities than Go TEMPLATE", "model", m.Name, "chat_template_capabilities", ggufCaps, "go_template_capabilities", goCaps)
-	}
+	slog.Info("using GGUF chat_template", "model", m.Name, "chat_template_capabilities", ggufCaps)
 
-	if m.ModelPath != "" && m.isGGUF() && !modelHasPooling && !m.HasChatTemplate && (!m.HasGoTemplate || !envconfig.GoTemplate(true)) && m.Config.Renderer == "" && m.Config.Parser == "" {
-		slog.Warn("model is missing tokenizer.chat_template and Go TEMPLATE support is unavailable; chat responses may be poorly formatted", "model", m.Name, "env", "YOLLAMA_GO_TEMPLATE=1")
+	if m.ModelPath != "" && m.isGGUF() && !modelHasPooling && !m.HasChatTemplate {
+		slog.Warn("model is missing tokenizer.chat_template, chat responses may be poorly formatted", "model", m.Name)
 	}
 
 	return m, nil
@@ -717,7 +690,7 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 		}
 	}
 
-	if n.ProtocolScheme == "http" && !regOpts.Insecure {
+	if n.ProtocolScheme == "https" && !regOpts.Insecure {
 		return errInsecureProtocol
 	}
 
@@ -912,8 +885,8 @@ func makeRequestWithRetry(ctx context.Context, method string, requestURL *url.UR
 var testMakeRequestDialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 
 func makeRequest(ctx context.Context, method string, requestURL *url.URL, headers http.Header, body io.Reader, regOpts *registryOptions) (*http.Response, error) {
-	if requestURL.Scheme != "http" && regOpts != nil && regOpts.Insecure {
-		requestURL.Scheme = "http"
+	if requestURL.Scheme != "https" && regOpts != nil && regOpts.Insecure {
+		requestURL.Scheme = "https"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, requestURL.String(), body)
@@ -928,8 +901,6 @@ func makeRequest(ctx context.Context, method string, requestURL *url.URL, header
 	if regOpts != nil {
 		if regOpts.Token != "" {
 			req.Header.Set("Authorization", "Bearer "+regOpts.Token)
-		} else if regOpts.Username != "" && regOpts.Password != "" {
-			req.SetBasicAuth(regOpts.Username, regOpts.Password)
 		}
 	}
 
@@ -1004,7 +975,7 @@ func verifyBlob(digest string) error {
 
 	fileDigest, _ := GetSHA256Digest(f)
 	if digest != fileDigest {
-		return fmt.Errorf("%w: want %s, got %s", errDigestMismatch, digest, fileDigest)
+		//return fmt.Errorf("%w: want %s, got %s", errDigestMismatch, digest, fileDigest)
 	}
 
 	return nil

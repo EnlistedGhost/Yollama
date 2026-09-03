@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,8 +19,6 @@ import (
 
 	"github.com/ollama/ollama/auth"
 	"github.com/ollama/ollama/envconfig"
-	internalcloud "github.com/ollama/ollama/internal/cloud"
-	"github.com/ollama/ollama/version"
 )
 
 const (
@@ -175,94 +172,8 @@ func proxyCloudRequest(c *gin.Context, body []byte, disabledOperation string) {
 }
 
 func proxyCloudRequestWithPath(c *gin.Context, body []byte, path string, disabledOperation string) {
-	if disabled, _ := internalcloud.Status(); disabled {
-		c.JSON(http.StatusForbidden, gin.H{"error": internalcloud.DisabledError(disabledOperation)})
-		return
-	}
-
-	baseURL, err := url.Parse(cloudProxyBaseURL)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	targetURL := baseURL.ResolveReference(&url.URL{
-		Path:     path,
-		RawQuery: c.Request.URL.RawQuery,
-	})
-
-	outReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, targetURL.String(), bytes.NewReader(body))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	copyProxyRequestHeaders(outReq.Header, c.Request.Header)
-	if clientVersion := strings.TrimSpace(version.Version); clientVersion != "" {
-		outReq.Header.Set(cloudProxyClientVersionHeader, clientVersion)
-	}
-	if outReq.Header.Get("Content-Type") == "" && len(body) > 0 {
-		outReq.Header.Set("Content-Type", "application/json")
-	}
-
-	if err := cloudProxySignRequest(outReq.Context(), outReq); err != nil {
-		slog.Warn("cloud proxy signing failed", "error", err)
-		writeCloudUnauthorized(c)
-		return
-	}
-
-	// TODO(drifkin): Add phase-specific proxy timeouts.
-	// Connect/TLS/TTFB should have bounded timeouts, but once streaming starts
-	// we should not enforce a short total timeout for long-lived responses.
-	resp, err := http.DefaultClient.Do(outReq)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-		return
-	}
-	defer resp.Body.Close()
-
-	copyProxyResponseHeaders(c.Writer.Header(), resp.Header)
-	c.Status(resp.StatusCode)
-
-	var bodyWriter http.ResponseWriter = c.Writer
-	var framedWriter *jsonlFramingResponseWriter
-	// TEMP(drifkin): only needed on the cloud-proxied first leg of Anthropic
-	// web_search fallback (which is a path we're removing soon). Local
-	// /v1/messages writes one JSON value per streamResponse callback directly
-	// into WebSearchAnthropicWriter, but this proxy copy loop may coalesce
-	// multiple jsonl records into one Write.  WebSearchAnthropicWriter currently
-	// unmarshals one JSON value per Write.
-	if path == "/api/chat" && resp.StatusCode == http.StatusOK && c.GetBool(legacyCloudAnthropicKey) {
-		framedWriter = &jsonlFramingResponseWriter{ResponseWriter: c.Writer}
-		bodyWriter = framedWriter
-	}
-
-	err = copyProxyResponseBody(bodyWriter, resp.Body)
-	if err == nil && framedWriter != nil {
-		err = framedWriter.FlushPending()
-	}
-	if err != nil {
-		ctxErr := c.Request.Context().Err()
-		if errors.Is(err, context.Canceled) && errors.Is(ctxErr, context.Canceled) {
-			slog.Debug(
-				"cloud proxy response stream closed by client",
-				"path", c.Request.URL.Path,
-				"status", resp.StatusCode,
-			)
-			return
-		}
-
-		slog.Warn(
-			"cloud proxy response copy failed",
-			"path", c.Request.URL.Path,
-			"upstream_path", path,
-			"status", resp.StatusCode,
-			"request_context_canceled", ctxErr != nil,
-			"request_context_err", ctxErr,
-			"error", err,
-		)
-		return
-	}
+	c.JSON(http.StatusForbidden, gin.H{"error": "REMOTE SERVER - FORBIDDEN"})
+	return
 }
 
 func replaceJSONModelField(body []byte, model string) ([]byte, error) {

@@ -110,12 +110,15 @@ func (m *Manifest) RemoveLayers() error {
 }
 
 func ParseNamedManifest(n model.Name) (*Manifest, error) {
+	slog.Info("[YOLLAMA] | ParseNamedManifest() - Started")
 	if !n.IsFullyQualified() {
+		slog.Info("[YOLLAMA] | ParseNamedManifest() - qualification error")
 		return nil, model.Unqualified(n)
 	}
 
 	manifests, err := Path()
 	if err != nil {
+		slog.Info("[YOLLAMA] | ParseNamedManifest() - pathing error")
 		return nil, err
 	}
 
@@ -124,17 +127,20 @@ func ParseNamedManifest(n model.Name) (*Manifest, error) {
 	var m Manifest
 	f, err := os.Open(p)
 	if err != nil {
+		slog.Info("[YOLLAMA] | ParseNamedManifest() - open file erorr")
 		return nil, err
 	}
 	defer f.Close()
 
 	fi, err := f.Stat()
 	if err != nil {
+		slog.Info("[YOLLAMA] | ParseNamedManifest() - stat error")
 		return nil, err
 	}
 
 	sha256sum := sha256.New()
 	if err := json.NewDecoder(io.TeeReader(f, sha256sum)).Decode(&m); err != nil {
+		slog.Info("[YOLLAMA] | ParseNamedManifest() - json decoder error")
 		return nil, err
 	}
 

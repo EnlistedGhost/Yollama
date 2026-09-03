@@ -79,14 +79,8 @@ func (s *Server) CreateHandler(c *gin.Context) {
 		}
 	}
 
-	for _, digest := range r.Adapters {
-		if digest == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": manifest.ErrInvalidDigestFormat.Error()})
-			return
-		}
-	}
-
 	name := model.ParseName(cmp.Or(r.Model, r.Name))
+	slog.Info("Verifying Model Name:", name)
 	if !name.IsValid() {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errtypes.InvalidModelNameErrMsg})
 		return
@@ -191,25 +185,6 @@ func (s *Server) CreateHandler(c *gin.Context) {
 			return
 		}
 
-		var adapterLayers []*layerGGML
-		if !remote && r.Adapters != nil {
-			adapterLayers, err = convertModelFromFiles(r.Adapters, baseLayers, true, fn)
-			if err != nil {
-				for _, badReq := range []error{errNoFilesProvided, errOnlyOneAdapterSupported, errOnlyGGUFSupported, errUnknownType, errFilePath} {
-					if errors.Is(err, badReq) {
-						ch <- gin.H{"error": err.Error(), "status": http.StatusBadRequest}
-						return
-					}
-				}
-				ch <- gin.H{"error": err.Error(), "status": http.StatusBadRequest}
-				return
-			}
-		}
-
-		if len(adapterLayers) > 0 {
-			baseLayers = append(baseLayers, adapterLayers...)
-		}
-
 		// Info is not currently exposed by Modelfiles, but allows overriding various
 		// config values
 		if r.Info != nil {
@@ -291,14 +266,14 @@ func remoteURL(raw string) (string, error) {
 	// Special‑case: user supplied only a path ("/foo/bar").
 	if strings.HasPrefix(raw, "/") {
 		return (&url.URL{
-			Scheme: "http",
-			Host:   net.JoinHostPort("localhost", "11434"),
+			Scheme: "https",
+			Host:   net.JoinHostPort("192.168.1.168", "11434"),
 			Path:   path.Clean(raw),
 		}).String(), nil
 	}
 
 	if !strings.Contains(raw, "://") {
-		raw = "http://" + raw
+		raw = "https://" + raw
 	}
 
 	u, err := url.Parse(raw)
@@ -307,7 +282,7 @@ func remoteURL(raw string) (string, error) {
 	}
 
 	if u.Host == "" {
-		u.Host = "localhost"
+		u.Host = "192.168.1.168"
 	}
 
 	hostPart, portPart, err := net.SplitHostPort(u.Host)
@@ -333,97 +308,52 @@ func convertModelFromFiles(files map[string]string, baseLayers []*layerGGML, isA
 }
 
 func convertModelFromFilesWithMediaType(files map[string]string, baseLayers []*layerGGML, isAdapter bool, mediaType string, detectTemplate bool, fn func(resp api.ProgressResponse)) ([]*layerGGML, error) {
-	switch detectModelTypeFromFiles(files) {
-	case "safetensors":
-		return nil, nil
-	case "gguf":
-		if len(files) == 0 {
-			return nil, errNoFilesProvided
-		} else if len(files) > 1 && isAdapter {
-			return nil, errOnlyOneAdapterSupported
-		}
+	if len(files) == 0 {
+		return nil, errNoFilesProvided
+	} else if len(files) > 1 && isAdapter {
+		return nil, errOnlyOneAdapterSupported
+	}
 
-		filePaths := make([]string, 0, len(files))
-		for filePath := range files {
-			filePaths = append(filePaths, filePath)
-		}
-		slices.Sort(filePaths)
+	filePaths := make([]string, 0, len(files))
+	for filePath := range files {
+		filePaths = append(filePaths, filePath)
+	}
+	slices.Sort(filePaths)
 
-		var allLayers []*layerGGML
-		var splitGroupKeys []string
-		splitGroups := map[string][]*layerGGML{}
-		for _, filePath := range filePaths {
-			layers, err := ggufLayersWithMediaType(files[filePath], filePath, mediaType, fn)
-			if err != nil {
+	var allLayers []*layerGGML
+	var splitGroupKeys []string
+	splitGroups := map[string][]*layerGGML{}
+	for _, filePath := range filePaths {
+		layers, err := ggufLayersWithMediaType(files[filePath], filePath, mediaType, fn)
+		if err != nil {
+			return nil, err
+		}
+		for _, layer := range layers {
+			if key, ok, err := splitGGUFGroupKey(layer); err != nil {
 				return nil, err
-			}
-			for _, layer := range layers {
-				if key, ok, err := splitGGUFGroupKey(layer); err != nil {
-					return nil, err
-				} else if ok {
-					if _, exists := splitGroups[key]; !exists {
-						splitGroupKeys = append(splitGroupKeys, key)
-					}
-					splitGroups[key] = append(splitGroups[key], layer)
-					continue
+			} else if ok {
+				if _, exists := splitGroups[key]; !exists {
+					splitGroupKeys = append(splitGroupKeys, key)
 				}
-				allLayers = append(allLayers, layer)
-			}
-		}
-
-		for _, key := range splitGroupKeys {
-			layer, err := mergeSplitGGUFLayers(splitGroups[key])
-			if err != nil {
-				return nil, err
+				splitGroups[key] = append(splitGroups[key], layer)
+				continue
 			}
 			allLayers = append(allLayers, layer)
 		}
-
-		if detectTemplate {
-			return detectChatTemplate(allLayers)
-		}
-		return allLayers, nil
-	default:
-		return nil, errUnknownType
-	}
-}
-
-func detectModelTypeFromFiles(files map[string]string) string {
-	for fn := range files {
-		if strings.HasSuffix(fn, ".safetensors") {
-			return "safetensors"
-		} else if strings.HasSuffix(fn, ".gguf") {
-			return "gguf"
-		} else {
-			// try to see if we can find a gguf file even without the file extension
-			blobPath, err := manifest.BlobsPath(files[fn])
-			if err != nil {
-				slog.Error("error getting blobs path", "file", fn)
-				return ""
-			}
-
-			f, err := os.Open(blobPath)
-			if err != nil {
-				slog.Error("error reading file", "error", err)
-				return ""
-			}
-			defer f.Close()
-
-			buf := make([]byte, 4)
-			_, err = f.Read(buf)
-			if err != nil {
-				slog.Error("error reading file", "error", err)
-				return ""
-			}
-
-			ct := ggml.DetectContentType(buf)
-			if ct == "gguf" {
-				return "gguf"
-			}
-		}
 	}
 
-	return ""
+	for _, key := range splitGroupKeys {
+		layer, err := mergeSplitGGUFLayers(splitGroups[key])
+		if err != nil {
+			return nil, err
+		}
+		allLayers = append(allLayers, layer)
+	}
+
+	if detectTemplate {
+		return detectChatTemplate(allLayers)
+	}
+	return allLayers, nil
 }
 
 func baseLayerTensors(layer *layerGGML) ([]*ggml.Tensor, func(), error) {

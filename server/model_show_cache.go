@@ -403,7 +403,6 @@ func cloneMessages(in []api.Message) []api.Message {
 				out[i].Images[j] = slices.Clone(image)
 			}
 		}
-		out[i].ToolCalls = slices.Clone(msg.ToolCalls)
 	}
 	return out
 }
