@@ -70,6 +70,8 @@ func (s *Server) StopModelHandler(c *gin.Context) {
 
 // Flush all active runners out of VRAM instantly
 func (s *Server) StopAllModelsHandler(c *gin.Context) {
+	var req StopRequest
+	
 	slog.Info("Global VRAM purge requested")
 
 	// Trigger native routine

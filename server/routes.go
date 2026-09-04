@@ -57,6 +57,7 @@ func writeModelRefParseError(c *gin.Context, err error, fallbackStatus int, fall
 
 // Set to either release or debug if development iteration
 var mode string = gin.ReleaseMode
+var modelLoaded int = 0
 
 type Server struct {
 	addr          net.Addr
@@ -153,18 +154,13 @@ func usesAutomaticNumBatch(model *Model, requestOpts map[string]any) bool {
 
 // scheduleRunner schedules a runner after validating inputs such as capabilities and model options.
 // It returns the allocated runner, model instance, and consolidated options if successful and error otherwise.
-func (s *Server) scheduleRunner(ctx context.Context, name string, capable []model.Capability, requestOpts map[string]any, keepAlive *api.Duration) (llm.LlamaServer, *Model, *api.Options, error) {
-	if name == "" {
+func (s *Server) scheduleRunner(ctx context.Context, model *Model, capable []model.Capability, requestOpts map[string]any, keepAlive *api.Duration) (llm.LlamaServer, *Model, *api.Options, error) {
+	if model == nil || model.Name == "" {
 		return nil, nil, nil, fmt.Errorf("model %w", errRequired)
 	}
 
-	model, err := GetModel(name)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
 	if err := model.CheckCapabilities(capable...); err != nil {
-		return nil, nil, nil, fmt.Errorf("%s %w", name, err)
+		return nil, nil, nil, fmt.Errorf("%s %w", model.Name, err)
 	}
 
 	numCtxAuto := usesAutomaticNumCtx(model, requestOpts)
@@ -751,10 +747,10 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	)
 
 	// General
-	r.HEAD("/", func(c *gin.Context) { c.String(http.StatusOK, "Yollama is running", gin.H{"version": version.Version}) })
-	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "Yollama is running", gin.H{"version": version.Version}) })
-	r.HEAD("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
-	r.GET("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
+	r.HEAD("/", func(c *gin.Context) { c.String(http.StatusOK, "Yollama is running ", gin.H{"Version": version.Version}) })
+	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "Yollama is running ", gin.H{"Version": version.Version}) })
+	r.HEAD("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"Version": version.Version}) })
+	r.GET("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"Version": version.Version}) })
 
 	// Local model cache management (new implementation is at end of function)
 	r.POST("/api/pull", s.PullHandler)
@@ -770,6 +766,7 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	r.POST("/api/copy", s.CopyHandler)
 
 	// Inference
+	r.GET("/api/model_status", s.modelStatusHandler)
 	r.POST("/api/chat", s.withInferenceRequestLogging("/api/chat", s.ChatHandler)...)
 
 	// Stop/Unload (Single or All)
@@ -976,6 +973,40 @@ func Serve(ln net.Listener) error {
     return nil
 }
 
+func (s *Server) modelStatusHandler(c *gin.Context) {
+	models := []api.ProcessModelResponse{}
+
+	for _, v := range s.sched.loadedModels() {
+		m := v.model
+		displayName := model.ParseName(m.ShortName).DisplayShortest()
+		modelDetails := api.ModelDetails{
+			Format:            m.Config.ModelFormat,
+			Family:            m.Config.ModelFamily,
+			Families:          m.Config.ModelFamilies,
+			ParameterSize:     m.Config.ModelType,
+			QuantizationLevel: m.Config.FileType,
+		}
+
+		models = append(models, api.ProcessModelResponse{
+			Model:         displayName,
+			Name:          displayName,
+			Size:          v.size,
+			SizeVRAM:      v.sizeVRAM,
+			Digest:        m.Digest,
+			Details:       modelDetails,
+			ExpiresAt:     v.expiresAt,
+			ContextLength: v.contextLength,
+		})
+	}
+
+	slices.SortStableFunc(models, func(i, j api.ProcessModelResponse) int {
+		// longest duration remaining listed first
+		return cmp.Compare(j.ExpiresAt.Unix(), i.ExpiresAt.Unix())
+	})
+
+	c.JSON(http.StatusOK, api.ProcessResponse{Models: models})
+}
+
 func waitForStream(c *gin.Context, ch chan any) {
 	c.Header("Content-Type", "application/json")
 	var latest api.ProgressResponse
@@ -1015,22 +1046,23 @@ func streamResponse(c *gin.Context, ch chan any) {
 		// an optional "status" field.  For errors that are streamed
 		// before any content, we need to set the status code and
 		// content type for the error.
-		if h, ok := val.(gin.H); ok {
-			if e, ok := h["error"].(string); ok {
+		h, ok := val.(gin.H)
+		if ok {
+			e, ok := h["error"].(string)
+			if ok {
 				status, ok := h["status"].(int)
 				if !ok {
 					status = http.StatusInternalServerError
 				}
-
 				if !c.Writer.Written() {
 					c.Header("Content-Type", "application/json")
 					c.JSON(status, gin.H{"error": e})
 				} else {
-					if err := json.NewEncoder(c.Writer).Encode(gin.H{"error": e}); err != nil {
+					err := json.NewEncoder(c.Writer).Encode(gin.H{"error": e})
+					if err != nil {
 						slog.Error("[YOLLAMA] | Stream-Response failed to encode json error", "error", err)
 					}
 				}
-
 				return false
 			}
 		}
@@ -1043,7 +1075,8 @@ func streamResponse(c *gin.Context, ch chan any) {
 
 		// Delineate chunks with new-line delimiter
 		bts = append(bts, '\n')
-		if _, err := w.Write(bts); err != nil {
+		_, err := w.Write(bts)
+		if err != nil {
 			slog.Info(fmt.Sprintf("[YOLLAMA] | Stream-Response: w.Write failed with %s", err))
 			return false
 		}
@@ -1123,18 +1156,15 @@ func writeChatResponse(c *gin.Context, req api.ChatRequest, ch chan any) {
 }
 
 func (s *Server) ChatHandler(c *gin.Context) {
-
 	var req api.ChatRequest
+	msg := "Chat Handler Started"
+	c.JSON(status, gin.H{"info": msg})
+
 	if err := c.ShouldBindJSON(&req); errors.Is(err, io.EOF) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
 		return
 	} else if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if req.TopLogprobs < 0 || req.TopLogprobs > 20 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "top_logprobs must be between 0 and 20"})
 		return
 	}
 
@@ -1145,14 +1175,13 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	}
 
 	name := modelRef.Name
-
 	name, err = getExistingName(name)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
 		return
 	}
 
-	m, err := GetModel(name.String())
+	m, err := s.getModel(name.String())
 	if err != nil {
 		switch {
 		case os.IsNotExist(err):
@@ -1165,31 +1194,27 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	if req.TopLogprobs < 0 || req.TopLogprobs > 20 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "top_logprobs must be between 0 and 20"})
-		return
-	}
-
-	//if modelRef.Source == modelSourceLocal {
-	//	c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", req.Model)})
-	//	return
-	//}
-
 	capable := []model.Capability{model.CapabilityCompletion}
+	r, m, opts, err := s.scheduleRunner(c.Request.Context(), m, capable, req.Options, req.KeepAlive, req.Shift)
 	modelCaps := m.Capabilities()
+
+	// Set thinking to "OFF"
+	req.Think = nil
+	// Overried "OFF" thinking if user requested "ON"
 	if slices.Contains(modelCaps, model.CapabilityThinking) {
-		capable = append(capable, model.CapabilityThinking)
-		if req.Think == nil {
+		if req.Think != nil {
+			msg = "Thinking/Reasoning is supported and selected, Thinking/Reasoning enabled"
 			req.Think = &api.ThinkValue{Value: true}
+		} else {
+			msg = "Thinking/Reasoning is supported but not selected, Thinking/Reasoning disabled"
+			c.JSON(status, gin.H{"info": msg})
 		}
 	} else {
-		if req.Think != nil && req.Think.Bool() {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%q does not support thinking", req.Model)})
-			return
-		}
+		msg = "Thinking/Reasoning not supported for current model, Thinking/Reasoning disabled"
+		c.JSON(status, gin.H{"warning": msg})
 	}
 
-	r, m, opts, err := s.scheduleRunner(c.Request.Context(), name.String(), capable, req.Options, req.KeepAlive)
+	r, m, opts, err := s.scheduleRunner(c.Request.Context(), m, capable, req.Options, req.KeepAlive)
 	if errors.Is(err, errCapabilityCompletion) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%q does not support chat", req.Model)})
 		return
@@ -1198,32 +1223,40 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	if len(req.Messages) == 0 {
-		c.JSON(http.StatusOK, api.ChatResponse{
-			Model:      req.Model,
-			CreatedAt:  time.Now().UTC(),
-			Message:    api.Message{Role: "assistant"},
-			Done:       true,
-			DoneReason: "load",
-		})
-		return
+	t := s.loadToggleForChatHandler(c)
+	if t {
+		s.loadForChatHandler(c)
 	}
 
 	msgs := append(m.Messages, req.Messages...)
-	//if chatModeForModel(m) == chatExecutionModeNative {
 	s.handleNativeChat(c, req, m, r, opts, msgs)
 	return
-	//}
+}
 
-	//type structuredOutputsState int
-	//const (
-	//	structuredOutputsState_None structuredOutputsState = iota
-	//	structuredOutputsState_ReadyToApply
-	//	structuredOutputsState_Applying
-	//)
+func (s *Server) loadToggleForChatHandler(c *gin.Context) {
+	var req api.ChatRequest
+	// Check if a model is loaded and unload first
+	if len(req.Messages) == 0 {
+		if modelLoaded > 0 {
+			sched.unloadAllRunners()
+			modelLoaded = 0
+		}
+		return true
+	}
 
-	//ch := make(chan any)
-	//writeChatResponse(c, req, ch)
+	return false
+}
+
+func (s *Server) loadForChatHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, api.ChatResponse{
+		Model:      req.Model,
+		CreatedAt:  time.Now().UTC(),
+		Message:    api.Message{Role: "assistant"},
+		Done:       true,
+		DoneReason: "load",
+	})
+	modelLoaded += 1
+	return
 }
 
 func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model, r llm.LlamaServer, opts *api.Options, msgs []api.Message) {
@@ -1232,8 +1265,6 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 		Format:      req.Format,
 		Options:     opts,
 		Think:       req.Think,
-		//Logprobs:    req.Logprobs,
-		//TopLogprobs: req.TopLogprobs,
 	}
 	var err error
 	nativeReq = nativeReq
@@ -1280,17 +1311,10 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 			} else {
 				ch <- gin.H{"error": err.Error()}
 			}
+			return
 		}
 	}()
 	writeChatResponse(c, req, ch)
-}
-
-func countChatImages(msgs []api.Message) int {
-	var count int
-	for _, msg := range msgs {
-		count += len(msg.Images)
-	}
-	return count
 }
 
 func handleScheduleError(c *gin.Context, name string, err error) {

@@ -67,6 +67,9 @@ type Model struct {
 	Messages           []api.Message
 
 	Template *template.Template
+
+	capabilities       []model.Capability
+	capabilitiesCached bool
 }
 
 func (m *Model) isGGUF() bool {
@@ -84,6 +87,10 @@ func appendCapability(capabilities []model.Capability, capability model.Capabili
 func (m *Model) Capabilities() []model.Capability {
 	capabilities := []model.Capability{}
 	var modelArch string
+
+	if m.capabilitiesCached {
+		return slices.Clone(m.capabilities)
+	}
 
 	capabilities = m.configCapabilities(capabilities)
 	capabilities, modelArch = m.ggufCapabilities(capabilities)
@@ -718,7 +725,16 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 		if err != nil {
 			return err
 		}
-		skipVerify[layer.Digest] = cacheHit
+		// If any download of a given digest was not a cache hit,
+		// always verify it. Without this guard, a config entry
+		// sharing a digest with a layer can overwrite the layer's
+		// false (needs verification) with true (cache hit), since
+		// the blob now exists on disk from the first download.
+		if existing, ok := skipVerify[layer.Digest]; !ok {
+			skipVerify[layer.Digest] = cacheHit
+		} else {
+			skipVerify[layer.Digest] = existing && cacheHit
+		}
 		delete(deleteMap, layer.Digest)
 	}
 
@@ -727,7 +743,8 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 		if skipVerify[layer.Digest] {
 			continue
 		}
-		if err := verifyBlob(layer.Digest); err != nil {
+		err := verifyBlob(layer.Digest)
+		if err != nil {
 			if errors.Is(err, errDigestMismatch) {
 				fp, err := manifest.BlobsPath(layer.Digest)
 				if err != nil {
@@ -752,7 +769,8 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+	err := os.MkdirAll(filepath.Dir(fp), 0o755)
+	if err != nil {
 		return err
 	}
 
