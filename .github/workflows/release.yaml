@@ -28,7 +28,7 @@ jobs:
       with:
         fetch-depth: 0  # Required to commit, tag, and push version updates properly
 
-    # 1. Automatically increment the version string inside version/version.go on master pushes
+    # 1. Automatically increment the build suffix inside version/version.go on master pushes
     - name: Increment Version in version.go (Master Push Only)
       id: bump_version
       if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -39,13 +39,15 @@ jobs:
         CURRENT_LINE=$(grep -E 'var\s+Version\s+string\s*=\s*".*"' version/version.go)
         RAW_VER=$(echo "$CURRENT_LINE" | sed -E 's/.*"(.*)"/\1/')
         
-        PREFIX=$(echo "$RAW_VER" | sed -E 's/^([0-9]+\.[0-9]+\.).*/\1/')
-        PATCH_AND_SUFFIX=$(echo "$RAW_VER" | sed -E 's/^[0-9]+\.[0-9]+\.(.*)/\1/')
-        PATCH_NUM=$(echo "$PATCH_AND_SUFFIX" | grep -oE '^[0-9]+')
-        SUFFIX=$(echo "$PATCH_AND_SUFFIX" | sed -E 's/^[0-9]+(.*)/\1/')
+        # Extracts everything up to the 'xc' (e.g., "0.33.0-xc")
+        PREFIX=$(echo "$RAW_VER" | sed -E 's/(.*xc)[0-9]+$/\1/')
         
-        NEW_PATCH=$((PATCH_NUM + 1))
-        NEW_RAW_VER="${PREFIX}${NEW_PATCH}${SUFFIX}"
+        # Extracts just the trailing number after 'xc' (e.g., "11")
+        BUILD_NUM=$(echo "$RAW_VER" | sed -E 's/.*xc([0-9]+)$/\1/')
+        
+        # Increments the trailing build number
+        NEW_BUILD=$((BUILD_NUM + 1))
+        NEW_RAW_VER="${PREFIX}${NEW_BUILD}"
         NEW_TAG="v${NEW_RAW_VER}"
         
         echo "Bumping version from $RAW_VER to $NEW_RAW_VER"
@@ -116,7 +118,7 @@ jobs:
       uses: softprops/action-gh-release@v3
       if: steps.bump_version.outputs.NEW_TAG != '' || startsWith(github.ref, 'refs/tags/v')
       with:
-        tag_name: ${{ steps.bump_version.outputs.NEW_TAG }}
+        tag_name: ${{ steps.bump_version.outputs.NEW_TAG || github.ref_name }}
         files: dist/yollama-linux-amd64.tar.gz
         generate_notes: true
       env:
