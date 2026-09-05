@@ -71,8 +71,13 @@ func (s *Server) StopModelHandler(c *gin.Context) {
 // Flush all active runners out of VRAM instantly
 func (s *Server) StopAllModelsHandler(c *gin.Context) {
 	var req StopRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
 	
 	slog.Info("Global VRAM purge requested")
+
 
 	// Trigger native routine
 	s.sched.unloadAllRunners()

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
 	"io"
 	"log"
 	"log/slog"
@@ -28,7 +27,6 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"golang.org/x/image/webp"
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/auth"
@@ -164,9 +162,9 @@ func (s *Server) scheduleRunner(ctx context.Context, model *Model, capable []mod
 	}
 
 	numCtxAuto := usesAutomaticNumCtx(model, requestOpts)
-	embeddingBatchDefault := applyBatchDefault(model, requestOpts)
-	numBatchAuto := usesAutomaticNumBatch(model, requestOpts) && !embeddingBatchDefault
-	opts, err := s.modelOptionsBatchDefault(model, requestOpts, embeddingBatchDefault)
+	modelBatchDefault := applyBatchDefault(model, requestOpts)
+	numBatchAuto := usesAutomaticNumBatch(model, requestOpts) && !modelBatchDefault
+	opts, err := s.modelOptionsBatchDefault(model, requestOpts, modelBatchDefault)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -367,7 +365,6 @@ func (s *Server) ShowHandler(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
 		return
 	}
-	//requestedModel := req.Model
 
 	modelRef, err := parseAndValidateModelRef(req.Model)
 	if err != nil {
@@ -702,28 +699,10 @@ func isLocalIP(ip netip.Addr) bool {
 func allowedHost(host string) bool {
 	host = strings.ToLower(host)
 
-	//if host == "" || host == "localhost" {
-	//	return true
-	//}
-
 	if hostname, err := os.Hostname(); err == nil && host == strings.ToLower(hostname) {
 		return true
 	}
 
-	//tlds := []string{
-	//	"localhost",
-	//	"local",
-	//	"internal",
-	//}
-
-	// check if the host is a local TLD
-	//for _, tld := range tlds {
-	//	if strings.HasSuffix(host, "."+tld) {
-	//		return true
-	//	}
-	//}
-
-	//return false
 	return true
 }
 
@@ -766,7 +745,6 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	r.POST("/api/copy", s.CopyHandler)
 
 	// Inference
-	r.GET("/api/model_status", s.modelStatusHandler)
 	r.POST("/api/chat", s.withInferenceRequestLogging("/api/chat", s.ChatHandler)...)
 
 	// Stop/Unload (Single or All)
@@ -869,7 +847,7 @@ func Serve(ln net.Listener) error {
 	s.modelCaches.Start(ctx)
 
 	slog.Info(fmt.Sprintf("[YOLLAMA] | Started on IP-Address: %s", ln.Addr()))
-	slog.Info(fmt.Sprintf("[YOLLAMA] | Build Version: %s\n", version.Version))
+	slog.Info(fmt.Sprintf("[YOLLAMA] | Build Version: %s", version.Version))
 	srvr := &http.Server{
 		// Use http.DefaultServeMux so we get net/http/pprof for
 		// free.
@@ -884,14 +862,11 @@ func Serve(ln net.Listener) error {
 		srvr.Close()
 		schedDone()
 		sched.unloadAllRunners()
+		modelLoaded = 0
 		done()
 	}()
 
 	s.sched.Run(schedCtx)
-
-	// register the experimental webp decoder
-	// so webp images can be used in multimodal inputs
-	image.RegisterFormat("webp", "RIFF????WEBP", webp.Decode, webp.DecodeConfig)
 
 	// Retrieve GPU information so we can get log messages before loading a model
 	// This will log warnings to the log in case we have problems with detected GPUs
@@ -910,27 +885,29 @@ func Serve(ln net.Listener) error {
 	slog.Info("[YOLLAMA] | Available VRAM:", format.HumanBytes2(totalVRAM))
 	slog.Info("[YOLLAMA] | Context Tokens:", s.defaultNumCtx)
 
-    // --- START SSL/TLS INJECTION FOR YOLLAMA ---
-    // Check for the yollama_tls.conf config file to determine server mode
+    // Check for yollama_tls.conf config for server mode
     pathTLSConfig, err := getYollamaTLSConfigPath()
     if err != nil {
         slog.Error("[YOLLAMA] | 🔒❌ Failed to resolve TLS config path.", "error", err)
         return err
     } else {
-        fmt.Printf("[YOLLAMA] | ✅ Fetched configured TLS config path: %s\n", pathTLSConfig)
+        slog.Info(fmt.Sprintf("[YOLLAMA] | ✅ Fetched configured TLS config path: %s\n", pathTLSConfig))
     }
 
     // Read the TLS enable/disable value (1 = true, 0 = false)
     tlsEnabled, err := readYollamaTLSConfig(pathTLSConfig)
     if err != nil {
-        // Fail open to plain HTTP rather than crashing startup.
+        // Fallback to plain HTTP config
         slog.Warn("[YOLLAMA] | 🔒⚠️ TLS config unreadable; defaulting to plain HTTP mode.", "error", err)
         tlsEnabled = false
+    } else if tlsEnabled {
+        slog.Info(fmt.Sprintf("[YOLLAMA] | ✅ Fetched configured TLS enabled value: %t", tlsEnabled))
     } else {
-        fmt.Printf("[YOLLAMA] | ✅ Fetched configured TLS enabled value: %t\n", tlsEnabled)
+    	slog.Info(fmt.Sprintf("[YOLLAMA] | ✅ Fetched configured TLS enabled value: %t", tlsEnabled))
     }
 
     var serveErr error
+    fNoFallbackHTTP := true
     if tlsEnabled {
         slog.Info("[YOLLAMA] | 🔒❔ Enabling Native TLS/HTTPS wrapper on listener...")
 
@@ -941,28 +918,36 @@ func Serve(ln net.Listener) error {
         cert, err := tls.LoadX509KeyPair(certFile, keyFile)
         if err != nil {
             slog.Error("[YOLLAMA] | 🔒❌ Failed to load SSL certificates. Make sure they are in the binary folder!", "error", err)
-            return err
+            fNoFallbackHTTP = false
         } else {
-            slog.Info("[YOLLAMA] | 🔒✅ Native TLS/HTTPS wrapper online!")
+            slog.Info("[YOLLAMA] | 🔒✅ Loaded SSL certificates, TLS/HTTPS wrapper enabled!")
         }
 
-        // Setup standard TLS Configuration
-        tlsConfig := &tls.Config{
-            Certificates: []tls.Certificate{cert},
-        }
+        if fNoFallbackHTTP {
+        	// Setup standard TLS Configuration
+        	tlsConfig := &tls.Config{
+            	Certificates: []tls.Certificate{cert},
+        	}
 
-        // Wrap raw network listener in TLS container
-        tlsListener := tls.NewListener(ln, tlsConfig)
+        	// Wrap raw network listener in TLS container
+        	tlsListener := tls.NewListener(ln, tlsConfig)
 
-        // Serve over TLS
-        serveErr = srvr.Serve(tlsListener)
+        	// Serve over TLS
+        	serveErr = srvr.Serve(tlsListener)
+
+        	slog.Info("[YOLLAMA] | 🔒🌐 Serving in TLS/SSL HTTPS mode (TLS enabled via config).")
+    	} else {
+    		// Fallback to Serve over plain HTTP
+        	serveErr = srvr.Serve(ln)
+
+        	slog.Info("[YOLLAMA] | 🌐 Falling back to HTTP mode (TLS disabled via Certificate Error).")
+    	}
     } else {
         slog.Info("[YOLLAMA] | 🌐 Serving in plain HTTP mode (TLS disabled via config).")
 
         // Serve over plain HTTP
         serveErr = srvr.Serve(ln)
     }
-    // --- END SSL/TLS INJECTION FOR YOLLAMA ---
 
     // If server is closed from the signal handler, wait for the ctx to be done
     // otherwise error out quickly
@@ -973,39 +958,6 @@ func Serve(ln net.Listener) error {
     return nil
 }
 
-func (s *Server) modelStatusHandler(c *gin.Context) {
-	models := []api.ProcessModelResponse{}
-
-	for _, v := range s.sched.loadedModels() {
-		m := v.model
-		displayName := model.ParseName(m.ShortName).DisplayShortest()
-		modelDetails := api.ModelDetails{
-			Format:            m.Config.ModelFormat,
-			Family:            m.Config.ModelFamily,
-			Families:          m.Config.ModelFamilies,
-			ParameterSize:     m.Config.ModelType,
-			QuantizationLevel: m.Config.FileType,
-		}
-
-		models = append(models, api.ProcessModelResponse{
-			Model:         displayName,
-			Name:          displayName,
-			Size:          v.size,
-			SizeVRAM:      v.sizeVRAM,
-			Digest:        m.Digest,
-			Details:       modelDetails,
-			ExpiresAt:     v.expiresAt,
-			ContextLength: v.contextLength,
-		})
-	}
-
-	slices.SortStableFunc(models, func(i, j api.ProcessModelResponse) int {
-		// longest duration remaining listed first
-		return cmp.Compare(j.ExpiresAt.Unix(), i.ExpiresAt.Unix())
-	})
-
-	c.JSON(http.StatusOK, api.ProcessResponse{Models: models})
-}
 
 func waitForStream(c *gin.Context, ch chan any) {
 	c.Header("Content-Type", "application/json")
@@ -1051,18 +1003,22 @@ func streamResponse(c *gin.Context, ch chan any) {
 			e, ok := h["error"].(string)
 			if ok {
 				status, ok := h["status"].(int)
+
 				if !ok {
 					status = http.StatusInternalServerError
 				}
+
 				if !c.Writer.Written() {
 					c.Header("Content-Type", "application/json")
 					c.JSON(status, gin.H{"error": e})
 				} else {
 					err := json.NewEncoder(c.Writer).Encode(gin.H{"error": e})
+
 					if err != nil {
 						slog.Error("[YOLLAMA] | Stream-Response failed to encode json error", "error", err)
 					}
 				}
+
 				return false
 			}
 		}
@@ -1070,14 +1026,16 @@ func streamResponse(c *gin.Context, ch chan any) {
 		bts, err := json.Marshal(val)
 		if err != nil {
 			slog.Info(fmt.Sprintf("[YOLLAMA] | Stream-Response: json.Marshal failed with %s", err))
+
 			return false
 		}
 
 		// Delineate chunks with new-line delimiter
 		bts = append(bts, '\n')
-		_, err := w.Write(bts)
-		if err != nil {
+		_, w_err := w.Write(bts)
+		if w_err != nil {
 			slog.Info(fmt.Sprintf("[YOLLAMA] | Stream-Response: w.Write failed with %s", err))
+
 			return false
 		}
 
@@ -1158,7 +1116,7 @@ func writeChatResponse(c *gin.Context, req api.ChatRequest, ch chan any) {
 func (s *Server) ChatHandler(c *gin.Context) {
 	var req api.ChatRequest
 	msg := "Chat Handler Started"
-	c.JSON(status, gin.H{"info": msg})
+	slog.Info("[YOLLAMA] | ChatHandler:", msg)
 
 	if err := c.ShouldBindJSON(&req); errors.Is(err, io.EOF) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
@@ -1194,24 +1152,29 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	capable := []model.Capability{model.CapabilityCompletion}
-	r, m, opts, err := s.scheduleRunner(c.Request.Context(), m, capable, req.Options, req.KeepAlive, req.Shift)
-	modelCaps := m.Capabilities()
+	fUnloadAndExpire := s.handleChatUnloadModel(c, req, m)
+	if fUnloadAndExpire {
+		msg = "Received model runner-expire request, Model is unloaded!"
+		slog.Info("[YOLLAMA] | ChatHandler:", msg)
+	}
 
-	// Set thinking to "OFF"
-	req.Think = nil
+	capable := []model.Capability{model.CapabilityCompletion}
+	modelCaps := m.Capabilities()
 	// Overried "OFF" thinking if user requested "ON"
 	if slices.Contains(modelCaps, model.CapabilityThinking) {
 		if req.Think != nil {
 			msg = "Thinking/Reasoning is supported and selected, Thinking/Reasoning enabled"
+			slog.Info("[YOLLAMA] | ChatHandler:", msg)
 			req.Think = &api.ThinkValue{Value: true}
 		} else {
 			msg = "Thinking/Reasoning is supported but not selected, Thinking/Reasoning disabled"
-			c.JSON(status, gin.H{"info": msg})
+			slog.Info("[YOLLAMA] | ChatHandler:", msg)
+			req.Think = nil
 		}
 	} else {
 		msg = "Thinking/Reasoning not supported for current model, Thinking/Reasoning disabled"
-		c.JSON(status, gin.H{"warning": msg})
+		slog.Info("[YOLLAMA] | ChatHandler:", msg)
+		req.Think = nil
 	}
 
 	r, m, opts, err := s.scheduleRunner(c.Request.Context(), m, capable, req.Options, req.KeepAlive)
@@ -1223,43 +1186,26 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	t := s.loadToggleForChatHandler(c)
-	if t {
-		s.loadForChatHandler(c)
-	}
-
 	msgs := append(m.Messages, req.Messages...)
-	s.handleNativeChat(c, req, m, r, opts, msgs)
-	return
-}
-
-func (s *Server) loadToggleForChatHandler(c *gin.Context) {
-	var req api.ChatRequest
-	// Check if a model is loaded and unload first
-	if len(req.Messages) == 0 {
-		if modelLoaded > 0 {
-			sched.unloadAllRunners()
-			modelLoaded = 0
-		}
-		return true
+	if req.Messages[0].Role != "system" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%q does not support chat", req.Model)})
+		return
 	}
 
-	return false
-}
+	fLoadAndRunner := s.handleChatLoadModel(c, req, m)
+	if fLoadAndRunner {
+		msg = "Received model load request, Model is now loaded!"
+		slog.Info("[YOLLAMA] | ChatHandler:", msg)
+	}
 
-func (s *Server) loadForChatHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, api.ChatResponse{
-		Model:      req.Model,
-		CreatedAt:  time.Now().UTC(),
-		Message:    api.Message{Role: "assistant"},
-		Done:       true,
-		DoneReason: "load",
-	})
-	modelLoaded += 1
+
+	s.handleNativeChat(c, req, m, r, opts, msgs)
+
 	return
 }
 
 func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model, r llm.LlamaServer, opts *api.Options, msgs []api.Message) {
+	slog.Info("[YOLLAMA] | Native_Chat status: Started")
 	nativeReq := llm.ChatRequest{
 		Messages:    msgs,
 		Format:      req.Format,
@@ -1269,7 +1215,7 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 	var err error
 	nativeReq = nativeReq
 	if err != nil {
-		slog.Error("[YOLLAMA] | Chat error", "error", err)
+		slog.Error("[YOLLAMA] | Native_Chat error", "error", err)
 		var serr api.StatusError
 		if errors.As(err, &serr) {
 			c.JSON(serr.StatusCode, gin.H{"error": serr.ErrorMessage})
@@ -1282,7 +1228,7 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 	ch := make(chan any)
 	go func() {
 		defer close(ch)
-
+		slog.Info("[YOLLAMA] | Native_Chat status: Chat make is running")
 		err := r.Chat(c.Request.Context(), nativeReq, func(r llm.ChatResponse) {
 			res := api.ChatResponse{
 				Model:     req.Model,
@@ -1311,10 +1257,45 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 			} else {
 				ch <- gin.H{"error": err.Error()}
 			}
-			return
 		}
 	}()
 	writeChatResponse(c, req, ch)
+}
+
+func (s *Server) handleChatLoadModel(c *gin.Context, req api.ChatRequest, m *Model) (bool) {
+	// Load model
+	if len(req.Messages) == 0 && req.Messages[0].Content == "" {
+		c.JSON(http.StatusOK, api.ChatResponse{
+			Model:      req.Model,
+			CreatedAt:  time.Now().UTC(),
+			Message:    api.Message{Role: "assistant"},
+			Done:       true,
+			DoneReason: "load",
+		})
+
+		return true
+	}
+
+	return false
+}
+
+func (s *Server) handleChatUnloadModel(c *gin.Context, req api.ChatRequest, m *Model) (bool) {
+		// Unload model (Expire the runner)
+	if req.Messages[0].Content == "" {
+		s.sched.expireRunner(m)
+
+		c.JSON(http.StatusOK, api.ChatResponse{
+			Model:      req.Model,
+			CreatedAt:  time.Now().UTC(),
+			Message:    api.Message{Role: "assistant"},
+			Done:       true,
+			DoneReason: "unload",
+		})
+
+		return true
+	}
+
+	return false
 }
 
 func handleScheduleError(c *gin.Context, name string, err error) {

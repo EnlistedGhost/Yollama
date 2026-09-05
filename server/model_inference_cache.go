@@ -3,10 +3,8 @@ package server
 import (
 	"maps"
 	"slices"
-	"strconv"
 	"sync"
 
-	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/manifest"
 	"github.com/ollama/ollama/types/model"
 	"golang.org/x/sync/singleflight"
@@ -59,7 +57,7 @@ func (c *inferenceModelCache) Get(name string) (*Model, error) {
 		return cloneInferenceModel(entry.model), nil
 	}
 
-	loadKey := key.name + "\x00" + digest + "\x00" + strconv.FormatBool(key.goTemplate) + "\x00" + strconv.FormatBool(key.goTemplateSet)
+	loadKey := key.name + "\x00" + digest
 	v, err, _ := c.loads.Do(loadKey, func() (any, error) {
 		c.mu.RLock()
 		entry, ok := c.entries[key]
@@ -95,10 +93,6 @@ func cloneInferenceModel(src *Model) *Model {
 	dst := *src
 	dst.Config.ModelFamilies = slices.Clone(src.Config.ModelFamilies)
 	dst.Config.Capabilities = slices.Clone(src.Config.Capabilities)
-	if src.Config.Draft != nil {
-		draft := *src.Config.Draft
-		dst.Config.Draft = &draft
-	}
 	dst.ProjectorPaths = slices.Clone(src.ProjectorPaths)
 	dst.License = slices.Clone(src.License)
 	dst.Options = maps.Clone(src.Options)

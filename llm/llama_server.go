@@ -1147,8 +1147,6 @@ func (s *llamaServerRunner) Completion(ctx context.Context, req CompletionReques
 	buf := make([]byte, 0, llamaServerStreamInitialBufferSize)
 	scanner.Buffer(buf, llamaServerStreamMaxBufferSize)
 
-	var lastToken string
-	var tokenRepeat int
 	var finalResp CompletionResponse
 	var hasFinalResp bool
 
@@ -1173,19 +1171,6 @@ func (s *llamaServerRunner) Completion(ctx context.Context, req CompletionReques
 			var lsResp llamaServerCompletionResponse
 			if err := json.Unmarshal(evt, &lsResp); err != nil {
 				return fmt.Errorf("error unmarshalling llama-server response: %v", err)
-			}
-
-			// Token repeat detection
-			switch {
-			case strings.TrimSpace(lsResp.Content) == lastToken:
-				tokenRepeat++
-			default:
-				lastToken = strings.TrimSpace(lsResp.Content)
-				tokenRepeat = 0
-			}
-			if tokenRepeat > 30 {
-				slog.Debug("prediction aborted, token repeat limit reached")
-				return ctx.Err()
 			}
 
 			if lsResp.Content != "" && !lsResp.Stop {

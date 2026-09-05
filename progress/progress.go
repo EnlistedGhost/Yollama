@@ -50,7 +50,7 @@ func (p *Progress) stop() (bool, int) {
 	})
 
 	p.mu.Lock()
-	defer p.mu.
+	defer p.mu.Unlock()
 
 	for _, state := range p.states {
 		if spinner, ok := state.(*Spinner); ok {
@@ -83,7 +83,7 @@ func (p *Progress) StopAndClear() bool {
 	stopped, pos := p.stop()
 	if stopped {
 		// clear all progress lines
-		for i := range p.pos {
+		for i := range pos {
 			if i > 0 {
 				fmt.Fprint(p.w, "\033[A")
 			}

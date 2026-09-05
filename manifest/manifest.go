@@ -110,7 +110,7 @@ func (m *Manifest) RemoveLayers() error {
 }
 
 func ParseNamedManifest(n model.Name) (*Manifest, error) {
-	slog.Info("[YOLLAMA] | ParseNamedManifest() - Started")
+	// slog.Info("[YOLLAMA] | ParseNamedManifest() - Started")
 	if !n.IsFullyQualified() {
 		slog.Info("[YOLLAMA] | ParseNamedManifest() - qualification error")
 		return nil, model.Unqualified(n)

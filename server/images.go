@@ -769,7 +769,7 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	if err != nil {
 		return err
 	}
-	err := os.MkdirAll(filepath.Dir(fp), 0o755)
+	err = os.MkdirAll(filepath.Dir(fp), 0o755)
 	if err != nil {
 		return err
 	}
