@@ -63,16 +63,16 @@ jobs:
       uses: robinraju/release-downloader@v1
       with:
         repository: "EnlistedGhost/Yollama"
-        tag: "b9840_amd64_linux"
-        fileName: "yollama-b9840-lib.tar.gz"
+        tag: "llama_cpp_libs"
+        fileName: "llama_cpp-b10444_rr.tar.gz"
         out-file-path: "lib"
 
     - name: Unpack Backend Assets
       run: |
         mkdir -p lib
         cd lib
-        tar -xzf yollama-b9840-lib.tar.gz || true
-        rm -f yollama-b9840-lib.tar.gz
+        tar -xzf llama_cpp-b10444_rr.tar.gz || true
+        rm -f llama_cpp-b10444_rr.tar.gz
         cd ../
 
     - name: Set up Go 1.26.x Toolchain
