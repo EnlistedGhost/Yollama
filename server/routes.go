@@ -170,14 +170,13 @@ func (s *Server) scheduleRunner(ctx context.Context, model *Model, capable []mod
 		return nil, nil, nil, err
 	}
 
+	runnerCh, errCh := s.sched.getRunner(ctx, model, opts, keepAlive, numCtxAuto, numBatchAuto)
 	var runner *runnerRef
-
-	runnerCh, err_R := s.sched.getRunner(ctx, model, opts, keepAlive, numCtxAuto, numBatchAuto)
-	if err_R != nil {
-		return nil, nil, nil, err_R
+	select {
+	case runner = <-runnerCh:
+	case err = <-errCh:
+		return nil, nil, nil, err
 	}
-
-	fmt.Sprintf("scheduleRunner - runner:", runnerCh)
 
 	return runner.llama, model, &opts, nil
 }

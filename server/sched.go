@@ -22,7 +22,6 @@ import (
 	"github.com/EnlistedGhost/Yollama/llm"
 	"github.com/EnlistedGhost/Yollama/logutil"
 	"github.com/EnlistedGhost/Yollama/ml"
-	"github.com/EnlistedGhost/Yollama/types/model"
 )
 
 type LlmRequest struct {
@@ -170,27 +169,7 @@ func (s *Scheduler) loadedModels() []loadedModel {
 	return models
 }
 
-func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration, numCtxAuto bool, numBatchAuto bool) (chan *runnerRef, error) {
-
-	// Handle insufficient NumCtx errors
-	if m.CheckCapabilities(model.CapabilityVision) != nil {
-		// multimodal models require higher NumCtx
-		if opts.NumCtx < 4096 {
-			fmt.Printf("[YOLLAMA NOTICE] - NumCtx error, Requested insufficient size!\n")
-			err := fmt.Errorf("getRunner() - NumCtx error, Requested insufficient size: %w", opts.NumCtx)
-			return nil, err
-		}
-	} else {
-		if opts.NumCtx < 2048 {
-			fmt.Printf("[YOLLAMA NOTICE] - NumCtx error, Requested insufficient size!\n")
-			err := fmt.Errorf("getRunner() - NumCtx error, Requested insufficient size: %w", opts.NumCtx)
-			return nil, err
-		}
-	}
-
-	var err error
-	isMaxQErr := false
-
+func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration, numCtxAuto bool, numBatchAuto bool) (chan *runnerRef, chan error) {
 	req := &LlmRequest{
 		ctx:             c,
 		model:           m,
@@ -212,15 +191,10 @@ func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, ses
 		select {
 		case s.pendingReqCh <- req:
 		default:
-			isMaxQErr = true
+			req.errCh <- ErrMaxQueue
 		}
 	}
-
-	if isMaxQErr == true {
-		err = ErrMaxQueue
-	}
-	
-	return req.successCh, err
+	return req.successCh, req.errCh
 }
 
 // Returns immediately, spawns go routines for the scheduler which will shutdown when ctx is done
