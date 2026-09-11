@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/format"
-	"github.com/ollama/ollama/llm"
-	"github.com/ollama/ollama/logutil"
-	"github.com/ollama/ollama/ml"
+	"github.com/EnlistedGhost/Yollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/format"
+	"github.com/EnlistedGhost/Yollama/llm"
+	"github.com/EnlistedGhost/Yollama/logutil"
+	"github.com/EnlistedGhost/Yollama/ml"
 )
 
 var (

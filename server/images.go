@@ -20,14 +20,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/fs/gguf"
-	"github.com/ollama/ollama/manifest"
-	"github.com/ollama/ollama/parser"
-	"github.com/ollama/ollama/template"
-	"github.com/ollama/ollama/types/model"
-	"github.com/ollama/ollama/version"
+	"github.com/EnlistedGhost/Yollama/api"
+	"github.com/EnlistedGhost/Yollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/fs/gguf"
+	"github.com/EnlistedGhost/Yollama/manifest"
+	"github.com/EnlistedGhost/Yollama/parser"
+	"github.com/EnlistedGhost/Yollama/template"
+	"github.com/EnlistedGhost/Yollama/types/model"
+	"github.com/EnlistedGhost/Yollama/version"
 )
 
 // Blobs newer than this may belong to another process that has not written its

@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/ollama/ollama/format"
+	"github.com/EnlistedGhost/Yollama/format"
 )
 
 type Bar struct {

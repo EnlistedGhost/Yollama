@@ -42,31 +42,22 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/fs/ggml"
-	"github.com/ollama/ollama/ml"
+	"github.com/EnlistedGhost/Yollama/api"
+	"github.com/EnlistedGhost/Yollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/fs/ggml"
+	"github.com/EnlistedGhost/Yollama/ml"
 )
 
-// DefaultModelNumBatch is the default NumBatch used for embedding models
-// when neither the model nor the request specifies num_batch.
-const (
-	DefaultModelNumBatch             = 1024
-)
+var globalModelNumBatch = 1024
 
-// DefaultModelNumBatchForContext caps the embedding batch default to the
-// active context length before it is passed to llama-server.
-func DefaultModelNumBatchForContext(numCtx int) int {
-	if numCtx > 0 {
-		return min(DefaultModelNumBatch, numCtx)
-	}
-	return DefaultModelNumBatch
+func SetGlobalModelNumBatchNum(globalBatchNum int) {
+	globalModelNumBatch = globalBatchNum
 }
 
-// WithDefaultModelNumBatch applies the llama-server embedding batch
+// withDefaultModelNumBatch applies the llama-server embedding batch
 // default to a copy of opts.
 func WithDefaultModelNumBatch(opts api.Options) api.Options {
-	opts.NumBatch = DefaultModelNumBatchForContext(opts.NumCtx)
+	opts.NumBatch = globalModelNumBatch
 	return opts
 }
 
@@ -495,7 +486,8 @@ func getYollamaCtxConfigPath() (string, error) {
     // 1. Get the dynamic home directory path
     homeUserDir, err := os.UserHomeDir()
     if err != nil {
-        log.Fatalf("[YOLLAMA] | Ctx config Error: no such directory found: %v", err)
+        slog.Error("[YOLLAMA] | Ctx config Error: no such directory found: %v", err)
+        return "", err
     }
 
     // 2. Safely join the home directory with the .yollama folder
@@ -527,12 +519,12 @@ func readYollamaCtxConfig(ctxConfigPath string) (int, error) {
     return numCtx_config, nil
 }
 
-func appendCtxArgs(params []string, opts api.Options) []string {
+func getCtxFromConfig() (int, error) {
+	// Get the Ctx config file path
 	pathCtxConfig, err := getYollamaCtxConfigPath()
-
     if err != nil {
         slog.Error("[YOLLAMA] | ❌ Failed to resolve Ctx config path.", "error", err)
-		return params
+		return 0, err
     } else {
         fmt.Printf("[YOLLAMA] | ✅ Fetched configured Ctx config path: %s\n", pathCtxConfig)
     }
@@ -542,27 +534,48 @@ func appendCtxArgs(params []string, opts api.Options) []string {
     if err != nil {
         // Fail open to base default Ctx (we set 0 here for now)
         slog.Warn("[YOLLAMA] | ⚠️ Ctx config unreadable; defaulting to static numCtx.", "error", err)
+        return 0, err
     } else {
       	fmt.Printf("[YOLLAMA] | ✅ Fetched configured Ctx enabled value: %t\n", setLlamaCtx)
     }
 
+    return setLlamaCtx, nil
+}
 
-	if setLlamaCtx > 0 {
-		params = append(params, "-c", strconv.Itoa(setLlamaCtx))
+func appendCtxArgs(params []string, opts api.Options) []string {
+	if opts.NumCtx > 0 {
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumCtx value: %s\n", opts.NumCtx)
+
+		params = append(params, "-c", strconv.Itoa(opts.NumCtx))
+
+		return params
+	} 
+
+	CtxOpts, err := getCtxFromConfig()
+	if err != nil {
+		fmt.Printf("[YOLLAMA] | ⚠️ (llama-server) Using emergency fallback defined NumCtx value: %s\n", strconv.Itoa(4096))
+		// Fallback to 4096 NumCtx if near-fatal
+		opts.NumCtx = 4096
 	} else {
-		setLlamaCtx = 29000 
-	params = append(params, "-c", strconv.Itoa(setLlamaCtx))
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using yollama's global config NumCtx value: %s\n", strconv.Itoa(CtxOpts))
+		opts.NumCtx = CtxOpts
 	}
+
+	params = append(params, "-c", strconv.Itoa(opts.NumCtx))
 
 	return params
 }
 
 func appendBatchArgs(params []string, opts api.Options) []string {
 	if opts.NumBatch > 0 {
-		params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumBatch value: %s\n", opts.NumBatch)
 	} else {
-		params = append(params, "-b", strconv.Itoa(1024), "-ub", strconv.Itoa(1024))
+		WithDefaultModelNumBatch(opts)
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using yollama's global config NumBatch value: %s\n", opts.NumBatch)
 	}
+
+	params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
+
 	return params
 }
 

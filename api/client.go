@@ -9,8 +9,8 @@
 // Several examples of using this package are available [in the GitHub
 // repository].
 //
-// [the API documentation]: https://github.com/ollama/ollama/blob/main/docs/api.md
-// [in the GitHub repository]: https://github.com/ollama/ollama/tree/main/api/examples
+// [the API documentation]: https://github.com/EnlistedGhost/Yollama/blob/main/docs/api.md
+// [in the GitHub repository]: https://github.com/EnlistedGhost/Yollama/tree/main/api/examples
 package api
 
 import (
@@ -25,10 +25,10 @@ import (
 	"net/url"
 	"runtime"
 
-	"github.com/ollama/ollama/auth"
-	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/format"
-	"github.com/ollama/ollama/version"
+	"github.com/EnlistedGhost/Yollama/auth"
+	"github.com/EnlistedGhost/Yollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/format"
+	"github.com/EnlistedGhost/Yollama/version"
 )
 
 // Client encapsulates client state for interacting with the yollama
@@ -298,7 +298,7 @@ type CreateProgressFunc func(ProgressResponse) error
 // Create creates a model from a [Modelfile]. fn is a progress function that
 // behaves similarly to other methods (see [Client.Pull]).
 //
-// [Modelfile]: https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx
+// [Modelfile]: https://github.com/EnlistedGhost/Yollama/blob/main/docs/modelfile.mdx
 func (c *Client) Create(ctx context.Context, req *CreateRequest, fn CreateProgressFunc) error {
 	return c.stream(ctx, http.MethodPost, "/api/create", req, func(bts []byte) error {
 		var resp ProgressResponse

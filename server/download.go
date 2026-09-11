@@ -22,10 +22,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/format"
-	"github.com/ollama/ollama/manifest"
-	"github.com/ollama/ollama/types/model"
+	"github.com/EnlistedGhost/Yollama/api"
+	"github.com/EnlistedGhost/Yollama/format"
+	"github.com/EnlistedGhost/Yollama/manifest"
+	"github.com/EnlistedGhost/Yollama/types/model"
 )
 
 const maxRetries = 6

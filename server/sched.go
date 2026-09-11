@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"reflect"
@@ -15,15 +14,15 @@ import (
 	"time"
 	"path/filepath"
 
-	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/discover"
-	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/format"
-	"github.com/ollama/ollama/fs/ggml"
-	"github.com/ollama/ollama/llm"
-	"github.com/ollama/ollama/logutil"
-	"github.com/ollama/ollama/ml"
-	"github.com/ollama/ollama/types/model"
+	"github.com/EnlistedGhost/Yollama/api"
+	"github.com/EnlistedGhost/Yollama/discover"
+	"github.com/EnlistedGhost/Yollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/format"
+	"github.com/EnlistedGhost/Yollama/fs/ggml"
+	"github.com/EnlistedGhost/Yollama/llm"
+	"github.com/EnlistedGhost/Yollama/logutil"
+	"github.com/EnlistedGhost/Yollama/ml"
+	"github.com/EnlistedGhost/Yollama/types/model"
 )
 
 type LlmRequest struct {
@@ -75,8 +74,8 @@ type Scheduler struct {
 // Model will still need to fit in VRAM, but loading many small models
 // on a large GPU can cause stalling
 var defaultModelsPerGPU = 2
-
-var ErrMaxQueue = errors.New("server busy, please try again.  maximum pending requests exceeded")
+var globalCurBatchNum = 0
+var ErrMaxQueue = errors.New("[YOLLAMA] | Error: Maximum pending requests exceeded!")
 
 func InitScheduler(ctx context.Context) *Scheduler {
 	maxQueue := envconfig.MaxQueue()
@@ -171,20 +170,26 @@ func (s *Scheduler) loadedModels() []loadedModel {
 	return models
 }
 
-func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration, numCtxAuto bool, numBatchAuto bool) (chan *runnerRef, chan error) {
+func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, sessionDuration *api.Duration, numCtxAuto bool, numBatchAuto bool) (chan *runnerRef, error) {
 
-	// Handle under-CTX cases
-	if opts.NumCtx < 1024 {
-		fmt.Printf("[YOLLAMA WARNING] - The context token size selected is unrealistic!\nConsider providing at minimum 4096 CTX tokens!!!\n")
-		if m.CheckCapabilities(model.CapabilityVision) != nil {
-			// multimodal models are automatically provided at least 10256 context
-			opts.NumCtx = 10256
-			fmt.Printf("[YOLLAMA NOTICE] - The context token size is now: 10256\n")
-		} else {
-			opts.NumCtx = 4092
-			fmt.Printf("[YOLLAMA NOTICE] - The context token size is now: 4092\n")
+	// Handle insufficient NumCtx errors
+	if m.CheckCapabilities(model.CapabilityVision) != nil {
+		// multimodal models require higher NumCtx
+		if opts.NumCtx < 4096 {
+			fmt.Printf("[YOLLAMA NOTICE] - NumCtx error, Requested insufficient size!\n")
+			err := fmt.Errorf("getRunner() - NumCtx error, Requested insufficient size: %w", opts.NumCtx)
+			return nil, err
+		}
+	} else {
+		if opts.NumCtx < 2048 {
+			fmt.Printf("[YOLLAMA NOTICE] - NumCtx error, Requested insufficient size!\n")
+			err := fmt.Errorf("getRunner() - NumCtx error, Requested insufficient size: %w", opts.NumCtx)
+			return nil, err
 		}
 	}
+
+	var err error
+	isMaxQErr := false
 
 	req := &LlmRequest{
 		ctx:             c,
@@ -207,10 +212,15 @@ func (s *Scheduler) getRunner(c context.Context, m *Model, opts api.Options, ses
 		select {
 		case s.pendingReqCh <- req:
 		default:
-			req.errCh <- ErrMaxQueue
+			isMaxQErr = true
 		}
 	}
-	return req.successCh, req.errCh
+
+	if isMaxQErr == true {
+		err = ErrMaxQueue
+	}
+	
+	return req.successCh, err
 }
 
 // Returns immediately, spawns go routines for the scheduler which will shutdown when ctx is done
@@ -507,12 +517,13 @@ func getPathBatchNumConfig() (string, error) {
 	// 1. Get the dynamic home directory path
 	homeUserDir, err := os.UserHomeDir()
 	if err != nil {
-		log.Fatalf("Error no such directory found: %v", err)
+		slog.Error("[YOLLAMA] | BatchNumConfig Error: no such directory found: %v", err)
+        return "", err
 	}
 
 	// 2. Safely join the home directory with the .yollama folder
 	ollamaPath := filepath.Join(homeUserDir, ".yollama")
-	fmt.Println("Yollama directory:", ollamaPath)
+	fmt.Println("[YOLLAMA] | BatchNumConfig directory:", ollamaPath)
 	
 	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "yollamaloader.conf")
 	return pathSchedBatchNumConfig, err
@@ -522,7 +533,7 @@ func readSchedLoaderBatchNumConfig(batchLoaderNumPath string) (int, error) {
 	// Read entire file into byte slice
 	batchConfigForLoader, err := os.ReadFile(batchLoaderNumPath)
 	if err != nil {
-		return 0, fmt.Errorf("failed to read file: %w", err)
+		return 0, fmt.Errorf("[YOLLAMA] | BatchNumConfig failed to read file: %w", err)
 	}
 
 	// Convert bytes to string (trim whitespace and newlines)
@@ -531,20 +542,40 @@ func readSchedLoaderBatchNumConfig(batchLoaderNumPath string) (int, error) {
 	// Convert string to integer
 	numLoaderBatch, err := strconv.Atoi(batchNumForLoader)
 	if err != nil {
-		return 0, fmt.Errorf("error converting configured loader batch size str to num")
+		return 0, fmt.Errorf("[YOLLAMA] | BatchNumConfig Error: converting configured loader batch size str to num")
 	}
 
 	return numLoaderBatch, err
 }
 
-// load creates a new model based on req and loads it. If requireFull is true then the model must be loaded fully onto GPUs
+func getBatchNumFromConfig() (int, error) {
+// Get path batch num config file
+	pathBatchNumConfig, err := getPathBatchNumConfig()
+	if err != nil {
+		slog.Error("[YOLLAMA] | BatchNumConfig Error: %v", err)
+		return 0, err
+	} else {
+		fmt.Printf("[YOLLAMA] | BatchNumConfig Fetched configured loader batch number: %s\n", pathBatchNumConfig)
+	}
+	// Fetch loader batch num from config file
+	numGetBatch, err := readSchedLoaderBatchNumConfig(pathBatchNumConfig)
+	if err != nil {
+		slog.Error("[YOLLAMA] | BatchNumConfig Error: %v", err)
+		return 0, err
+	} else {
+		fmt.Printf("[YOLLAMA] | BatchNumConfig Fetched configured loader batch number: %d\n", numGetBatch)
+	}
+
+	globalCurBatchNum = numGetBatch
+	llm.SetGlobalModelNumBatchNum(globalCurBatchNum)
+
+	return numGetBatch, err
+}
+
+// load creates a new model based on req and loads it. 
+// If requireFull is true then the model must be loaded fully onto GPUs
 // (if any). Returns whether the scheduler needs to evict a model to make this one fit.
 func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.DeviceInfo, requireFull bool) bool {
-	//numParallel := max(int(envconfig.NumParallel()), 1)
-	//completion := req.model.CheckCapabilities(model.CapabilityCompletion) == nil
-
-	// Always load with parallel=1 
-	// (Is the resource use worth the negligible gains?)
 	numParallel := 1
 
 	sessionDuration := envconfig.KeepAlive()
@@ -561,57 +592,47 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 	if llama == nil {
 		var err error
 
-			// Get path batch num config file
-			pathBatchNumConfig, err := getPathBatchNumConfig()
+		if req.opts.NumBatch == 0 {
+			launchOpts.NumBatch, err = getBatchNumFromConfig()
 			if err != nil {
-				log.Fatalf("error %v", err)
-				return false
-			} else {
-				fmt.Printf("Fetched configured loader batch number: %s\n", pathBatchNumConfig)
-			}
-			// Fetch loader batch num from config file
-			LoaderBatchNum, err := readSchedLoaderBatchNumConfig(pathBatchNumConfig)
-			if err != nil {
-				log.Fatalf("error %v", err)
-				return false
-			} else {
-				fmt.Printf("Fetched configured loader batch number: %d\n", LoaderBatchNum)
-			}
-			var loadErr error
-			f, loadErr = llm.LoadModel(req.model.ModelPath, LoaderBatchNum)
-			if loadErr != nil {
-				slog.Info("failed to load model metadata", "model", req.model.ModelPath, "error", loadErr)
-				req.errCh <- loadErr
-				//s.loadedMu.Lock()
-				s.loadedMu.Unlock()
 				return false
 			}
-
+		} else {
 			launchOpts.NumBatch = req.opts.NumBatch
+			globalCurBatchNum = launchOpts.NumBatch
+			llm.SetGlobalModelNumBatchNum(globalCurBatchNum)
+		}
 
-			// evict before spawning.
-			if len(s.loaded) > 0 && len(loadGpus) > 0 {
-				//s.loadedMu.Lock()
-				s.loadedMu.Unlock()
-				return true
-			}
+		var loadErr error
+		f, loadErr = llm.LoadModel(req.model.ModelPath, globalCurBatchNum)
+		if loadErr != nil {
+			slog.Info("[YOLLAMA] | failed to load model metadata", "model", req.model.ModelPath, "error", loadErr)
+			req.errCh <- loadErr
+			s.loadedMu.Unlock()
+			return false
+		}
 
-			launchOpts = s.applyLlamaServerLaunchConfigs(req, launchOpts, systemInfo, loadGpus, f, numParallel)
-			config := llm.LlamaServerConfig{ DisableJinja: false, }
-			llama, err = s.newServerFn(systemInfo, loadGpus, req.model.ModelPath, f, req.model.ProjectorPaths, launchOpts, numParallel, config)
-			if err != nil {
-				// some older models are not compatible with newer versions of llama.cpp
-				// show a generalized compatibility error until there is a better way to
-				// check for model compatibility
-				if errors.Is(err, ggml.ErrUnsupportedFormat) || strings.Contains(err.Error(), "failed to load model") {
-					err = fmt.Errorf("%v: this model may be incompatible with your version of Yollama. If you previously pulled this model, try updating it by running `yollama pull %s`", err, req.model.ShortName)
-				}
+		// evict before spawning.
+		if len(s.loaded) > 0 && len(loadGpus) > 0 {
+			s.loadedMu.Unlock()
+			return true
+		}
+
+		launchOpts = s.applyLlamaServerLaunchConfigs(req, launchOpts, systemInfo, loadGpus, f, numParallel)
+		config := llm.LlamaServerConfig{ DisableJinja: false, }
+		llama, err = s.newServerFn(systemInfo, loadGpus, req.model.ModelPath, f, req.model.ProjectorPaths, launchOpts, numParallel, config)
+		if err != nil {
+			// some older models are not compatible with newer versions of llama.cpp
+			// show a generalized compatibility error until there is a better way to
+			// check for model compatibility
+			if errors.Is(err, ggml.ErrUnsupportedFormat) || strings.Contains(err.Error(), "[YOLLAMA] | failed to load model") {
+				err = fmt.Errorf("%v: this model may be incompatible with your version of Yollama. If you previously pulled this model, try updating it by running `yollama pull %s`", err, req.model.ShortName)
 			}
+		}
 		
 		if err != nil {
-			slog.Info("failed to create server", "model", req.model.ShortName, "error", err)
+			slog.Info("[YOLLAMA] | failed to create server", "model", req.model.ShortName, "error", err)
 			req.errCh <- err
-			//s.loadedMu.Lock()
 			s.loadedMu.Unlock()
 			return false
 		}
@@ -623,7 +644,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 			wantPath = req.model.ShortName
 		}
 		if s.activeLoading.ModelPath() != wantPath {
-			panic(fmt.Errorf("attempting to load different model after eviction (original %v new %v)", s.activeLoading.ModelPath(), wantPath))
+			panic(fmt.Errorf("[YOLLAMA] | attempting to load different model after eviction (original %v new %v)", s.activeLoading.ModelPath(), wantPath))
 		}
 	}
 
@@ -632,14 +653,14 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 	systemTotalMemory := systemInfo.TotalMemory
 	systemFreeMemory := systemInfo.FreeMemory
 	systemSwapFreeMemory := systemInfo.FreeSwap
-	slog.Info("system memory", "total", format.HumanBytes2(systemTotalMemory), "free", format.HumanBytes2(systemFreeMemory), "free_swap", format.HumanBytes2(systemSwapFreeMemory))
+	slog.Info("[YOLLAMA] | system memory", "total", format.HumanBytes2(systemTotalMemory), "free", format.HumanBytes2(systemFreeMemory), "free_swap", format.HumanBytes2(systemSwapFreeMemory))
 
 	for _, gpu := range loadGpus {
 		available := gpu.FreeMemory - envconfig.GpuOverhead() - gpu.MinimumMemory()
 		if gpu.FreeMemory < envconfig.GpuOverhead()+gpu.MinimumMemory() {
 			available = 0
 		}
-		slog.Info("gpu memory", "id", gpu.ID, "library", gpu.Library,
+		slog.Info("[YOLLAMA] | gpu memory", "id", gpu.ID, "library", gpu.Library,
 			"available", format.HumanBytes2(available),
 			"free", format.HumanBytes2(gpu.FreeMemory),
 			"minimum", format.HumanBytes2(gpu.MinimumMemory()),
@@ -651,7 +672,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 		if errors.Is(err, llm.ErrLoadRequiredFull) {
 			if !requireFull {
 				// No other models loaded, yet we still don't fit, so report an error
-				slog.Info("model is too large for system memory", "requireFull", requireFull)
+				slog.Info("[YOLLAMA] | model is too large for system memory", "requireFull", requireFull)
 				s.activeLoading.Close()
 				s.activeLoading = nil
 				req.errCh <- err
@@ -660,7 +681,7 @@ func (s *Scheduler) load(req *LlmRequest, systemInfo ml.SystemInfo, gpus []ml.De
 			return true
 		}
 
-		slog.Info("Load failed", "model", req.model.ModelPath, "error", err)
+		slog.Info("[YOLLAMA] | Load failed", "model", req.model.ModelPath, "error", err)
 		s.activeLoading.Close()
 		s.activeLoading = nil
 		s.loadedMu.Lock()
@@ -709,26 +730,26 @@ iGPUScan:
 	s.loadedMu.Lock()
 	if oldRunner, ok := s.loaded[runner.modelKey]; ok {
 		// Shouldn't happen, but safeguard against leaking a runner
-		slog.Warn("model was still loaded", "old_runner", oldRunner, "new_runner", runner)
+		slog.Warn("[YOLLAMA] | model was still loaded", "old_runner", oldRunner, "new_runner", runner)
 		oldRunner.refMu.Lock()
 		oldRunner.unload()
 		oldRunner.refMu.Unlock()
 	}
 	s.activeLoading = nil
 	s.loaded[runner.modelKey] = runner
-	slog.Info("loaded runners", "count", len(s.loaded))
+	slog.Info("[YOLLAMA] | loaded runners", "count", len(s.loaded))
 	s.loadedMu.Unlock()
 
 	go func() {
 		defer runner.refMu.Unlock()
 		if err = llama.WaitUntilRunning(req.ctx); err != nil {
-			slog.Error("error loading llama server", "error", err)
+			slog.Error("[YOLLAMA] | error loading llama server", "error", err)
 			req.errCh <- err
-			slog.Debug("triggering expiration for failed load", "runner", runner)
+			slog.Debug("[YOLLAMA] | triggering expiration for failed load", "runner", runner)
 			s.expiredCh <- runner
 			return
 		}
-		slog.Debug("finished setting up", "runner", runner)
+		slog.Debug("[YOLLAMA] | finished setting up", "runner", runner)
 		if runner.pid < 0 {
 			runner.pid = llama.Pid()
 		}
@@ -736,7 +757,7 @@ iGPUScan:
 		runner.loading = false
 		go func() {
 			<-req.ctx.Done()
-			slog.Debug("context for request finished")
+			slog.Debug("[YOLLAMA] | context for request finished")
 			s.finishedReqCh <- req
 		}()
 		req.successCh <- runner
@@ -779,7 +800,7 @@ func (s *Scheduler) updateFreeSpace(allGpus []ml.DeviceInfo) {
 				predMap[gpu.DeviceID] += r.llama.VRAMByGPU(gpu.DeviceID)
 			}
 		} else {
-			slog.Warn("unexpected nil runner reference, memory prediction may be incorrect")
+			slog.Warn("[YOLLAMA] | unexpected nil runner reference, memory prediction may be incorrect")
 		}
 		r.refMu.Unlock()
 	}
@@ -787,10 +808,10 @@ func (s *Scheduler) updateFreeSpace(allGpus []ml.DeviceInfo) {
 	// Now that we've summed up all the GPU usage predictions across all the loaded runners, update the gpu list
 	for i := range allGpus {
 		if p, ok := predMap[allGpus[i].DeviceID]; ok {
-			slog.Debug("gpu reported", "gpu", allGpus[i].ID, "library", allGpus[i].Library, "available", format.HumanBytes2(allGpus[i].FreeMemory))
+			slog.Debug("[YOLLAMA] | gpu reported", "gpu", allGpus[i].ID, "library", allGpus[i].Library, "available", format.HumanBytes2(allGpus[i].FreeMemory))
 			if p > allGpus[i].TotalMemory {
 				// Shouldn't happen
-				slog.Warn("predicted usage exceeds VRAM", "gpu", allGpus[i].ID, "totalMemory", allGpus[i].TotalMemory, "predicted", p)
+				slog.Warn("[YOLLAMA] | predicted usage exceeds VRAM", "gpu", allGpus[i].ID, "totalMemory", allGpus[i].TotalMemory, "predicted", p)
 				allGpus[i].FreeMemory = 0
 			} else if (allGpus[i].TotalMemory - p) < allGpus[i].FreeMemory { // predicted free is smaller than reported free, use it
 				// TODO maybe we should just always trust our numbers, since cuda's free memory reporting is laggy
@@ -798,7 +819,7 @@ func (s *Scheduler) updateFreeSpace(allGpus []ml.DeviceInfo) {
 				// after we start our first runner, then we'll never account for that, so picking the smallest free value seems prudent.
 				allGpus[i].FreeMemory = allGpus[i].TotalMemory - p
 			}
-			slog.Info("updated VRAM based on existing loaded models", "gpu", allGpus[i].ID, "library", allGpus[i].Library, "total", format.HumanBytes2(allGpus[i].TotalMemory), "available", format.HumanBytes2(allGpus[i].FreeMemory))
+			slog.Info("[YOLLAMA] | updated VRAM based on existing loaded models", "gpu", allGpus[i].ID, "library", allGpus[i].Library, "total", format.HumanBytes2(allGpus[i].TotalMemory), "available", format.HumanBytes2(allGpus[i].FreeMemory))
 		}
 	}
 }
@@ -842,7 +863,7 @@ func (runner *runnerRef) unload() {
 }
 
 func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool {
-	slog.Debug("evaluating already loaded", "model", schedulerModelKey(req.model))
+	slog.Debug("[YOLLAMA] | evaluating already loaded", "model", schedulerModelKey(req.model))
 	runner.refMu.Lock()
 	defer runner.refMu.Unlock()
 
@@ -887,7 +908,7 @@ func (s *Scheduler) waitForVRAMRecovery(runner *runnerRef, runners []ml.Filtered
 	// CPU doesn't need checking, so no waiting required
 	if len(runner.gpus) == 0 {
 		finished <- struct{}{}
-		slog.Debug("no need to wait for VRAM recovery", "runner", runner)
+		slog.Debug("[YOLLAMA] | no need to wait for VRAM recovery", "runner", runner)
 		return finished
 	}
 	start := time.Now()
@@ -926,12 +947,12 @@ func (s *Scheduler) waitForVRAMRecovery(runner *runnerRef, runners []ml.Filtered
 				}
 				// If we're within ~75% of the estimated memory usage recovered, bail out
 				if float32(freeMemoryNow-freeMemoryBefore) > float32(runner.vramSize)*0.75 {
-					slog.Debug(fmt.Sprintf("gpu VRAM free memory converged after %0.2f seconds", time.Since(start).Seconds()), "free_before", format.HumanBytes2(freeMemoryBefore), "free_now", format.HumanBytes2(freeMemoryNow), "runner", runner)
+					slog.Debug(fmt.Sprintf("[YOLLAMA] | gpu VRAM free memory converged after %0.2f seconds", time.Since(start).Seconds()), "free_before", format.HumanBytes2(freeMemoryBefore), "free_now", format.HumanBytes2(freeMemoryNow), "runner", runner)
 					finished <- struct{}{}
 					return
 				}
 			case <-ctx.Done():
-				slog.Debug("gpu VRAM usage didn't recover within timeout", "seconds", time.Since(start).Seconds(), "free_before", format.HumanBytes2(freeMemoryBefore), "free_now", format.HumanBytes2(freeMemoryNow), "runner", runner)
+				slog.Debug("[YOLLAMA] | gpu VRAM usage didn't recover within timeout", "seconds", time.Since(start).Seconds(), "free_before", format.HumanBytes2(freeMemoryBefore), "free_now", format.HumanBytes2(freeMemoryNow), "runner", runner)
 				finished <- struct{}{}
 				return
 			}

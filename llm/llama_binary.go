@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ollama/ollama/ml"
+	"github.com/EnlistedGhost/Yollama/ml"
 )
 
 type llamaCppBinarySearch struct {

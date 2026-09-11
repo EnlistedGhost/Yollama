@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"strings"
 
-	fsggml "github.com/ollama/ollama/fs/ggml"
-	"github.com/ollama/ollama/llm"
-	"github.com/ollama/ollama/manifest"
+	fsggml "github.com/EnlistedGhost/Yollama/fs/ggml"
+	"github.com/EnlistedGhost/Yollama/llm"
+	"github.com/EnlistedGhost/Yollama/manifest"
 )
 
 // findLlamaQuantize locates the llama-quantize binary (installed alongside llama-server).

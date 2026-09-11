@@ -13,7 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ollama/ollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/envconfig"
 )
 
 type inferenceRequestLogger struct {

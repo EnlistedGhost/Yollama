@@ -17,8 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/ollama/ollama/auth"
-	"github.com/ollama/ollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/auth"
+	"github.com/EnlistedGhost/Yollama/envconfig"
 )
 
 const (

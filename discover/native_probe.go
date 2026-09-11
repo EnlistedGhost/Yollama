@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ollama/ollama/llm"
-	"github.com/ollama/ollama/ml"
+	"github.com/EnlistedGhost/Yollama/llm"
+	"github.com/EnlistedGhost/Yollama/ml"
 )
 
 // Native GPU discovery runs in a short-lived Yollama subprocess so loading GGML

@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/ollama/ollama/ml"
+	"github.com/EnlistedGhost/Yollama/ml"
 )
 
 func filterOldCUDADriver(_ context.Context, devices []ml.DeviceInfo) []ml.DeviceInfo {

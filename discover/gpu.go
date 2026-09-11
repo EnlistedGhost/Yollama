@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ollama/ollama/logutil"
-	"github.com/ollama/ollama/ml"
+	"github.com/EnlistedGhost/Yollama/logutil"
+	"github.com/EnlistedGhost/Yollama/ml"
 )
 
 // Jetson devices have JETSON_JETPACK="x.y.z" factory set to the Jetpack version installed.

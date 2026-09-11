@@ -1,4 +1,4 @@
-module github.com/ollama/ollama
+module github.com/EnlistedGhost/Yollama
 
 go 1.26.0
 

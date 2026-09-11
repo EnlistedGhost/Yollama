@@ -13,10 +13,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ollama/ollama/format"
-	"github.com/ollama/ollama/fs/util/bufioutil"
-	"github.com/ollama/ollama/logutil"
-	"github.com/ollama/ollama/ml"
+	"github.com/EnlistedGhost/Yollama/format"
+	"github.com/EnlistedGhost/Yollama/fs/util/bufioutil"
+	"github.com/EnlistedGhost/Yollama/logutil"
+	"github.com/EnlistedGhost/Yollama/ml"
 )
 
 type GGML struct {

@@ -5,8 +5,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/ollama/ollama/manifest"
-	"github.com/ollama/ollama/types/model"
+	"github.com/EnlistedGhost/Yollama/manifest"
+	"github.com/EnlistedGhost/Yollama/types/model"
 	"golang.org/x/sync/singleflight"
 )
 

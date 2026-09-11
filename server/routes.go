@@ -28,18 +28,18 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/auth"
-	"github.com/ollama/ollama/discover"
-	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/format"
-	"github.com/ollama/ollama/fs/ggml"
-	"github.com/ollama/ollama/llm"
-	"github.com/ollama/ollama/logutil"
-	"github.com/ollama/ollama/manifest"
-	"github.com/ollama/ollama/types/errtypes"
-	"github.com/ollama/ollama/types/model"
-	"github.com/ollama/ollama/version"
+	"github.com/EnlistedGhost/Yollama/api"
+	"github.com/EnlistedGhost/Yollama/auth"
+	"github.com/EnlistedGhost/Yollama/discover"
+	"github.com/EnlistedGhost/Yollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/format"
+	"github.com/EnlistedGhost/Yollama/fs/ggml"
+	"github.com/EnlistedGhost/Yollama/llm"
+	"github.com/EnlistedGhost/Yollama/logutil"
+	"github.com/EnlistedGhost/Yollama/manifest"
+	"github.com/EnlistedGhost/Yollama/types/errtypes"
+	"github.com/EnlistedGhost/Yollama/types/model"
+	"github.com/EnlistedGhost/Yollama/version"
 )
 
 func writeModelRefParseError(c *gin.Context, err error, fallbackStatus int, fallbackMessage string) {
@@ -83,25 +83,25 @@ var (
 	errBadTemplate = errors.New("template error")
 )
 
-func (s *Server) modelOptions(model *Model, requestOpts map[string]any) (api.Options, error) {
-	return s.modelOptionsBatchDefault(model, requestOpts, applyBatchDefault(model, requestOpts))
+func (s *Server) modelOptions(model *Model, requestOpts map[string]any, applyModelBatchDefault bool) (api.Options, error) {
+	return s.applyModelOptions(model, requestOpts, applyBatchDefault(model, requestOpts))
 }
 
-func (s *Server) modelOptionsBatchDefault(model *Model, requestOpts map[string]any, applyModelBatchDefault bool) (api.Options, error) {
+func (s *Server) applyModelOptions(model *Model, requestOpts map[string]any, applyModelBatchDefault bool) (api.Options, error) {
 	opts := api.DefaultOptions()
 	if opts.NumCtx == 0 {
 		opts.NumCtx = s.defaultNumCtx
 	}
 
 	// api.Options stores defaulted values
-	if model != nil {
-		if err := opts.FromMap(model.Options); err != nil {
-			return api.Options{}, err
-		}
+	err_apiOpts := opts.FromMap(model.Options)
+	if err_apiOpts != nil {
+		return api.Options{}, err_apiOpts
 	}
 
-	if err := opts.FromMap(requestOpts); err != nil {
-		return api.Options{}, err
+	err_reqOpts := opts.FromMap(requestOpts)
+	if err_reqOpts != nil {
+		return api.Options{}, err_reqOpts
 	}
 
 	if applyModelBatchDefault {
@@ -135,7 +135,7 @@ func usesAutomaticNumCtx(model *Model, requestOpts map[string]any) bool {
 			return false
 		}
 	}
-	return envconfig.ContextLength() == 0
+	return true
 }
 
 func usesAutomaticNumBatch(model *Model, requestOpts map[string]any) bool {
@@ -150,32 +150,34 @@ func usesAutomaticNumBatch(model *Model, requestOpts map[string]any) bool {
 	return true
 }
 
-// scheduleRunner schedules a runner after validating inputs such as capabilities and model options.
-// It returns the allocated runner, model instance, and consolidated options if successful and error otherwise.
+// Schedules runner after validating inputs, capabilities, and options
+// Returns allocated runner, model instance, and consolidated options (or) error
 func (s *Server) scheduleRunner(ctx context.Context, model *Model, capable []model.Capability, requestOpts map[string]any, keepAlive *api.Duration) (llm.LlamaServer, *Model, *api.Options, error) {
 	if model == nil || model.Name == "" {
 		return nil, nil, nil, fmt.Errorf("model %w", errRequired)
 	}
 
-	if err := model.CheckCapabilities(capable...); err != nil {
+	err := model.CheckCapabilities(capable...)
+	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%s %w", model.Name, err)
 	}
 
 	numCtxAuto := usesAutomaticNumCtx(model, requestOpts)
 	modelBatchDefault := applyBatchDefault(model, requestOpts)
 	numBatchAuto := usesAutomaticNumBatch(model, requestOpts) && !modelBatchDefault
-	opts, err := s.modelOptionsBatchDefault(model, requestOpts, modelBatchDefault)
+	opts, err := s.modelOptions(model, requestOpts, modelBatchDefault)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	runnerCh, errCh := s.sched.getRunner(ctx, model, opts, keepAlive, numCtxAuto, numBatchAuto)
 	var runner *runnerRef
-	select {
-	case runner = <-runnerCh:
-	case err = <-errCh:
-		return nil, nil, nil, err
+
+	runnerCh, err_R := s.sched.getRunner(ctx, model, opts, keepAlive, numCtxAuto, numBatchAuto)
+	if err_R != nil {
+		return nil, nil, nil, err_R
 	}
+
+	fmt.Sprintf("scheduleRunner - runner:", runnerCh)
 
 	return runner.llama, model, &opts, nil
 }
@@ -1161,6 +1163,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	capable := []model.Capability{model.CapabilityCompletion}
 	modelCaps := m.Capabilities()
 	// Overried "OFF" thinking if user requested "ON"
+	req.Think = nil
 	if slices.Contains(modelCaps, model.CapabilityThinking) {
 		if req.Think != nil {
 			msg = "Thinking/Reasoning is supported and selected, Thinking/Reasoning enabled"

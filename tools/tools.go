@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/ollama/ollama/api"
+	"github.com/EnlistedGhost/Yollama/api"
 )
 
 type toolsState int

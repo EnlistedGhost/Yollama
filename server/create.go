@@ -25,15 +25,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/format"
-	ofs "github.com/ollama/ollama/fs"
-	"github.com/ollama/ollama/fs/ggml"
-	"github.com/ollama/ollama/manifest"
-	"github.com/ollama/ollama/template"
-	"github.com/ollama/ollama/types/errtypes"
-	"github.com/ollama/ollama/types/model"
+	"github.com/EnlistedGhost/Yollama/api"
+	"github.com/EnlistedGhost/Yollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/format"
+	ofs "github.com/EnlistedGhost/Yollama/fs"
+	"github.com/EnlistedGhost/Yollama/fs/ggml"
+	"github.com/EnlistedGhost/Yollama/manifest"
+	"github.com/EnlistedGhost/Yollama/template"
+	"github.com/EnlistedGhost/Yollama/types/errtypes"
+	"github.com/EnlistedGhost/Yollama/types/model"
 )
 
 var (

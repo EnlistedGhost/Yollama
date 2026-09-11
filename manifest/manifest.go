@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ollama/ollama/types/model"
+	"github.com/EnlistedGhost/Yollama/types/model"
 )
 
 type Manifest struct {

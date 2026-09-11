@@ -1,1 +1,1 @@
-cd ~/Builds/yollama-SRC-0.33.3-xc41/; export PATH=$PATH:/usr/local/cuda/bin; export PATH=~/Builds/go-1.24.13-toolchain/go/bin/:$PATH; export MAKEFLAGS="-j8 -fno-aggressive-loop-optimizations"; export GOMAXPROCS=8; go clean -cache; go generate ./...; go build -o yollama .
+cd ~/Builds/yollama-SRC-0.33.3-xc43/; export PATH=$PATH:/usr/local/cuda/bin; export PATH=~/Builds/go-1.24.13-toolchain/go/bin/:$PATH; export MAKEFLAGS="-j18 -fno-aggressive-loop-optimizations"; export GOMAXPROCS=18; go clean -cache; go generate ./...; go build -o yollama .

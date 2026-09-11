@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ollama/ollama/format"
-	"github.com/ollama/ollama/logutil"
+	"github.com/EnlistedGhost/Yollama/format"
+	"github.com/EnlistedGhost/Yollama/logutil"
 )
 
 // GPULayers is a set of layers to be allocated on a single GPU
