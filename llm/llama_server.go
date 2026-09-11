@@ -570,7 +570,7 @@ func appendBatchArgs(params []string, opts api.Options) []string {
 	if opts.NumBatch > 0 {
 		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumBatch value: %s\n", opts.NumBatch)
 	} else {
-		WithDefaultModelNumBatch(opts)
+		opts = WithDefaultModelNumBatch(opts)
 		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using yollama's global config NumBatch value: %s\n", opts.NumBatch)
 	}
 
