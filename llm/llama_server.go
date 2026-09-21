@@ -309,6 +309,7 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		"--cache-type-k", "f16",
 		"--cache-type-v", "f16",
 		//"--agent",
+		"--reasoning", "off",
 		"--reasoning-format", "deepseek-legacy",
     	//"--video-ffmpeg-dir", "/home/sera/.glassmorphic/.glassmorphism_media",
 	}
@@ -316,8 +317,17 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 	// Append additional params
     params = append(params, "--log-prompts-dir", pathToPrompts)
     params = append(params, "--media-path", pathToMedia)
-    params = append(params, "--load-mode", "mmap")
-    //params = append(params, "--mmap")
+    fCheckedLlama, fLegacyLlama, vMsg := should_Append_Llama_Args()
+    if !fLegacyLlama && !fCheckedLlama {
+    	slog.Error("[YOLLAMA] | ❌ Llama.cpp Version ERROR: %s\n", vMsg)
+    	return nil, 0, err
+    } else if fLegacyLlama && fCheckedLlama {
+    	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is Legacy Version: %s\n", vMsg)
+    	params = append(params, "--mmap")
+    } else {
+    	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is New-Type Version: %s\n", vMsg)
+    	params = append(params, "--load-mode", "mmap")
+    }
     params = appendLlamaServerLogArgs(params)
 	params = appendJinjaArgs(params, launch.config)
 	params = appendMMProjArgs(params, launch)
@@ -337,7 +347,7 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 	cmd.SysProcAttr = LlamaServerSysProcAttr
 	SetupLlamaServerCommandEnv(cmd, exe, launch.gpuLibs, launch.extraEnvs)
 
-	slog.Info("starting llama-server", "cmd", cmd)
+	slog.Info("[YOLLAMA] | (llama-server) - Starting Llama.cpp Runner", "cmd", cmd)
 	slog.Debug("subprocess", "", filteredEnv(cmd.Env))
 
 	if err = cmd.Start(); err != nil {
@@ -479,6 +489,85 @@ func appendMediaArgs(params []string, opts api.Options) []string {
 	//--image, --audio, --video FILE
 	// Hey... Hey go-lang? GO FUCK YOURSELF!
 	return params
+}
+
+// getYollamaTLSConfigPath returns the full path to the llama-cpp_v.conf file.
+func get_Llama_CPP_v_ConfigPath() (string, error) {
+    // 1. Get the dynamic home directory path
+    rootDir, err := os.UserHomeDir()
+    if err != nil {
+        slog.Error("[YOLLAMA] | Llama.cpp Version Check Error: no such directory found: %v", err)
+        return "", err
+    }
+
+    // 2. Safely join the home directory with the .yollama folder
+    v_file_path := filepath.Join(rootDir, ".yollama")
+    fmt.Println("Llama.cpp Version Check Directory:", v_file_path)
+
+    v_Llama_Path := filepath.Join(v_file_path, "llama-cpp_v.conf")
+    return v_Llama_Path, err
+}
+
+// readYollamaTLSConfig reads the config file and returns true if TLS is enabled.
+// The file should contain either 1 (true) or 0 (false).
+func read_Llama_V_Num(v_llama_Path string) (int, error) {
+    // Read entire file into byte slice
+    v_Llama_Data, err := os.ReadFile(v_llama_Path)
+    if err != nil {
+        return 0, fmt.Errorf("[YOLLAMA] | failed to read Llama.cpp Version file: %w", err)
+    }
+
+    // Convert bytes to string (trim whitespace and newlines)
+    v_Value := strings.TrimSpace(string(v_Llama_Data))
+
+    // Convert string to integer
+    num_V_config, err := strconv.Atoi(v_Value)
+    if err != nil {
+        return 0, fmt.Errorf("[YOLLAMA] | error converting configured Llama.cpp Version value str to num")
+    }
+
+    return num_V_config, nil
+}
+
+func get_Llama_V_Num() (int, error) {
+	// Get the Ctx config file path
+	path_v_num, err := get_Llama_CPP_v_ConfigPath()
+    if err != nil {
+        slog.Error("[YOLLAMA] | ❌ Failed to resolve Llama.cpp Version file path.", "error", err)
+		return 0, err
+    } else {
+        fmt.Printf("[YOLLAMA] | ✅ Fetched configured Llama.cpp Version file path: %s\n", path_v_num)
+    }
+
+	// Read the Ctx value
+    Llama_V_num, err := read_Llama_V_Num(path_v_num)
+    if err != nil {
+        // Fail open to base default Ctx (we set 0 here for now)
+        slog.Warn("[YOLLAMA] | ⚠️ Llama.cpp Version file unreadable; defaulting to static numCtx.", "error", err)
+        return 0, err
+    } else {
+      	fmt.Printf("[YOLLAMA] | ✅ Fetched Llama.cpp Version file with value: %t\n", Llama_V_num)
+    }
+
+    return Llama_V_num, nil
+}
+
+func should_Append_Llama_Args() (bool, bool, string) {
+	// Check Llama.cpp Version for depricated flags
+	cur_Llama_Ver, err := get_Llama_V_Num()
+	if err != nil {
+		return false, false, "Llama.cpp Version Check Failure!"
+	} else if cur_Llama_Ver == 0 {
+		return false, false, "Llama.cpp Version Is Invalid!"
+	}
+
+	if cur_Llama_Ver < 10444 {
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using Legacy Llama.cpp Arguments")
+		return true, true, "Llama.cpp Version Was Verified!"
+	} 
+	
+	fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using New Llama.cpp Arguments")
+	return true, false, "Llama.cpp Version Was Verified!"
 }
 
 // getYollamaTLSConfigPath returns the full path to the yollama_tls.conf file.

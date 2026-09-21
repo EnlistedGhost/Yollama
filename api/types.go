@@ -578,14 +578,6 @@ type GenerateResponse struct {
 	// Logprobs contains log probability information for the generated tokens,
 	// if requested via the Logprobs parameter.
 	Logprobs []Logprob `json:"logprobs,omitempty"`
-
-	// Completed is the number of completed steps in image generation.
-	// Only present for image generation models during streaming.
-	Completed int64 `json:"completed,omitempty"`
-
-	// Total is the total number of steps for image generation.
-	// Only present for image generation models during streaming.
-	Total int64 `json:"total,omitempty"`
 }
 
 // ModelDetails provides details about a model.

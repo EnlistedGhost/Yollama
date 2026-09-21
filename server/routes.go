@@ -55,7 +55,7 @@ func writeModelRefParseError(c *gin.Context, err error, fallbackStatus int, fall
 
 // Set to either release or debug if development iteration
 var mode string = gin.ReleaseMode
-var modelLoaded int = 0
+var ModelLoaded int = 0
 
 type Server struct {
 	addr          net.Addr
@@ -863,7 +863,7 @@ func Serve(ln net.Listener) error {
 		srvr.Close()
 		schedDone()
 		sched.unloadAllRunners()
-		modelLoaded = 0
+		ModelLoaded = 0
 		done()
 	}()
 
