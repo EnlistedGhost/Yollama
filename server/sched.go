@@ -22,6 +22,7 @@ import (
 	"github.com/EnlistedGhost/Yollama/llm"
 	"github.com/EnlistedGhost/Yollama/logutil"
 	"github.com/EnlistedGhost/Yollama/ml"
+	"github.com/EnlistedGhost/Yollama/gobetween"
 )
 
 type LlmRequest struct {
@@ -73,7 +74,7 @@ type Scheduler struct {
 // Model will still need to fit in VRAM, but loading many small models
 // on a large GPU can cause stalling
 var defaultModelsPerGPU = 2
-var globalCurBatchNum = 0
+var GlobalCurBatchNum = 0
 var ErrMaxQueue = errors.New("[YOLLAMA] | Error: Maximum pending requests exceeded!")
 
 func InitScheduler(ctx context.Context) *Scheduler {

@@ -46,6 +46,7 @@ import (
 	"github.com/EnlistedGhost/Yollama/envconfig"
 	"github.com/EnlistedGhost/Yollama/fs/ggml"
 	"github.com/EnlistedGhost/Yollama/ml"
+	"github.com/EnlistedGhost/Yollama/gobetween"
 )
 
 var globalModelNumBatch = 1024
@@ -61,8 +62,7 @@ func WithDefaultModelNumBatch(opts api.Options) api.Options {
 	return opts
 }
 
-// llamaServerRunner wraps an upstream llama-server process and implements the LlamaServer interface.
-// It communicates with llama-server over HTTP.
+// Go lang sux, whatever
 type llamaServerRunner struct {
 	port               int
 	cmd                *exec.Cmd
@@ -655,12 +655,90 @@ func appendCtxArgs(params []string, opts api.Options) []string {
 	return params
 }
 
-func appendBatchArgs(params []string, opts api.Options) []string {
-	if opts.NumBatch > 0 {
-		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumBatch value: %s\n", opts.NumBatch)
+func getPathBatchNumConfig() (string, error) {
+	// 1. Get the dynamic home directory path
+	homeUserDir, err := os.UserHomeDir()
+	if err != nil {
+		slog.Error("[YOLLAMA] | BatchNumConfig Error: no such directory found: %v", err)
+        return "", err
+	}
+
+	// 2. Safely join the home directory with the .yollama folder
+	ollamaPath := filepath.Join(homeUserDir, ".yollama")
+	fmt.Println("[YOLLAMA] | BatchNumConfig directory:", ollamaPath)
+	
+	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "yollamaloader.conf")
+	return pathSchedBatchNumConfig, err
+}
+
+func readSchedLoaderBatchNumConfig(batchLoaderNumPath string) (int, error) {
+	// Read entire file into byte slice
+	batchConfigForLoader, err := os.ReadFile(batchLoaderNumPath)
+	if err != nil {
+		return 0, fmt.Errorf("[YOLLAMA] | BatchNumConfig failed to read file: %w", err)
+	}
+
+	// Convert bytes to string (trim whitespace and newlines)
+	batchNumForLoader := strings.TrimSpace(string(batchConfigForLoader))
+
+	// Convert string to integer
+	numLoaderBatch, err := strconv.Atoi(batchNumForLoader)
+	if err != nil {
+		return 0, fmt.Errorf("[YOLLAMA] | BatchNumConfig Error: converting configured loader batch size str to num")
+	}
+
+	return numLoaderBatch, err
+}
+
+func getBatchNumFromConfig() (int, error) {
+// Get path batch num config file
+	pathBatchNumConfig, err := getPathBatchNumConfig()
+	if err != nil {
+		slog.Error("[YOLLAMA] | BatchNumConfig Error: %v", err)
+		return 0, err
 	} else {
-		opts = WithDefaultModelNumBatch(opts)
-		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using yollama's global config NumBatch value: %s\n", opts.NumBatch)
+		fmt.Printf("[YOLLAMA] | BatchNumConfig Fetched configured loader batch number: %s\n", pathBatchNumConfig)
+	}
+	// Fetch loader batch num from config file
+	numGetBatch, err := readSchedLoaderBatchNumConfig(pathBatchNumConfig)
+	if err != nil {
+		slog.Error("[YOLLAMA] | BatchNumConfig Error: %v", err)
+		return 0, err
+	} else {
+		fmt.Printf("[YOLLAMA] | BatchNumConfig Fetched configured loader batch number: %d\n", numGetBatch)
+	}
+
+	SetGlobalModelNumBatchNum(numGetBatch)
+	gobetween.SetGlobalBatches(numGetBatch)
+
+	return numGetBatch, err
+}
+
+
+func appendBatchArgs(params []string, opts api.Options) []string {
+	//if opts.NumBatch > 0 {
+	//	fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumBatch value: %s\n", opts.NumBatch)
+	//} else {
+	//	opts = WithDefaultModelNumBatch(opts)
+	//	fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using yollama's global config NumBatch value: %s\n", opts.NumBatch)
+	//}
+
+	if opts.NumBatch > 1024 {
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumBatch value: %s\n", opts.NumBatch)
+
+		params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
+
+		return params
+	} 
+
+	BatchOpts, err := getBatchNumFromConfig()
+	if err != nil {
+		fmt.Printf("[YOLLAMA] | ⚠️ (llama-server) Using emergency fallback defined NumBatch value: %s\n", strconv.Itoa(globalModelNumBatch))
+		// Fallback to 1024 NumBatch if near-fatal
+		opts.NumBatch = globalModelNumBatch
+	} else {
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using yollama's global config NumBatch value: %s\n", strconv.Itoa(BatchOpts))
+		opts.NumBatch = BatchOpts
 	}
 
 	params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
