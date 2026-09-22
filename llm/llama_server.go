@@ -46,7 +46,6 @@ import (
 	"github.com/EnlistedGhost/Yollama/envconfig"
 	"github.com/EnlistedGhost/Yollama/fs/ggml"
 	"github.com/EnlistedGhost/Yollama/ml"
-	"github.com/EnlistedGhost/Yollama/gobetween"
 )
 
 var globalModelNumBatch = 1024
@@ -62,7 +61,8 @@ func WithDefaultModelNumBatch(opts api.Options) api.Options {
 	return opts
 }
 
-// Go lang sux, whatever
+// llamaServerRunner wraps an upstream llama-server process and implements the LlamaServer interface.
+// It communicates with llama-server over HTTP.
 type llamaServerRunner struct {
 	port               int
 	cmd                *exec.Cmd
@@ -709,7 +709,6 @@ func getBatchNumFromConfig() (int, error) {
 	}
 
 	SetGlobalModelNumBatchNum(numGetBatch)
-	gobetween.SetGlobalBatches(numGetBatch)
 
 	return numGetBatch, err
 }
