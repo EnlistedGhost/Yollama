@@ -248,7 +248,8 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 
 	// Allocate a port
 	port = 9229
-	if a, err := net.ResolveTCPAddr("tcp", "localhost:0"); err == nil {
+	a, err := net.ResolveTCPAddr("tcp", "localhost:0")
+	if err == nil {
 		var l *net.TCPListener
 		if l, err = net.ListenTCP("tcp", a); err == nil {
 			port = l.Addr().(*net.TCPAddr).Port
@@ -259,21 +260,6 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		slog.Debug("ResolveTCPAddr failed, using random port")
 		port = 9229
 	}
-
-	pathToPrompts, err := getLlamaPromptsPath()
-    if err != nil {
-        slog.Error("[YOLLAMA] | ❌ Failed to resolve Saved-Prompts path.", "error", err)
-        return cmd, port, nil
-    } else {
-        fmt.Printf("[YOLLAMA] | ✅ Fetched Saved-Prompts path: %s\n", pathToPrompts)
-    }
-    pathToMedia, err := getLlamaMediaPath()
-    if err != nil {
-        slog.Error("[YOLLAMA] | ❌ Failed to resolve Media path.", "error", err)
-        return cmd, port, nil
-    } else {
-        fmt.Printf("[YOLLAMA] | ✅ Fetched Media path: %s\n", pathToMedia)
-    }
 
 	// NOTES: IGNORE THESE COMMENTS, they are for myself as notes only.
 	//
@@ -309,32 +295,20 @@ func startLlamaServer(launch llamaServerLaunchConfig, out io.Writer) (cmd *exec.
 		"--cache-type-k", "f16",
 		"--cache-type-v", "f16",
 		//"--agent",
-		"--reasoning", "off",
-		"--reasoning-format", "deepseek-legacy",
     	//"--video-ffmpeg-dir", "/home/sera/.glassmorphic/.glassmorphism_media",
 	}
 
 	// Append additional params
-    params = append(params, "--log-prompts-dir", pathToPrompts)
-    params = append(params, "--media-path", pathToMedia)
-    fCheckedLlama, fLegacyLlama, vMsg := should_Append_Llama_Args()
-    if !fLegacyLlama && !fCheckedLlama {
-    	slog.Error("[YOLLAMA] | ❌ Llama.cpp Version ERROR: %s\n", vMsg)
-    	return nil, 0, err
-    } else if fLegacyLlama && fCheckedLlama {
-    	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is Legacy Version: %s\n", vMsg)
-    	params = append(params, "--mmap")
-    } else {
-    	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is New-Type Version: %s\n", vMsg)
-    	params = append(params, "--load-mode", "mmap")
-    }
     params = appendLlamaServerLogArgs(params)
 	params = appendJinjaArgs(params, launch.config)
 	params = appendMMProjArgs(params, launch)
+	params = appendMmapArgs(params, launch.opts)
+	params = appendLocalFileArgs(params, launch.opts)
 	//params = appendFlashAttentionArgs(params, launch.gpus)
 	params = appendCtxArgs(params, launch.opts)
 	params = appendBatchArgs(params, launch.opts)
 	params = appendMediaArgs(params, launch.opts)
+	params = appendThinkingArgs(params, launch.opts)
 
 	// Set up library paths for GPU backend discovery
 	cmd = exec.Command(exe, params...)
@@ -491,6 +465,44 @@ func appendMediaArgs(params []string, opts api.Options) []string {
 	return params
 }
 
+func appendLocalFileArgs(params []string, opts api.Options) []string {
+	pathToPrompts, err := getLlamaPromptsPath()
+    if err != nil {
+        slog.Error("[YOLLAMA] | ❌ Failed to resolve Saved-Prompts path.", "error", err)
+        return params
+    } else {
+        fmt.Printf("[YOLLAMA] | ✅ Fetched Saved-Prompts path: %s\n", pathToPrompts)
+    }
+    pathToMedia, err := getLlamaMediaPath()
+    if err != nil {
+        slog.Error("[YOLLAMA] | ❌ Failed to resolve Media path.", "error", err)
+        return params
+    } else {
+        fmt.Printf("[YOLLAMA] | ✅ Fetched Media path: %s\n", pathToMedia)
+    }
+
+    params = append(params, "--log-prompts-dir", pathToPrompts)
+    params = append(params, "--media-path", pathToMedia)
+
+    return params
+}
+
+func appendMmapArgs(params []string, opts api.Options) []string {
+	fCheckedLlama, fLegacyLlama, vMsg := should_Append_Llama_Args()
+    if !fLegacyLlama && !fCheckedLlama {
+    	slog.Error("[YOLLAMA] | ❌ Llama.cpp Version ERROR: %s\n", vMsg)
+    	return params
+    } else if fLegacyLlama && fCheckedLlama {
+    	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is Legacy Version: %s\n", vMsg)
+    	params = append(params, "--mmap")
+    } else {
+    	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is New-Type Version: %s\n", vMsg)
+    	params = append(params, "--load-mode", "mmap")
+    }
+
+    return params
+}
+
 // getYollamaTLSConfigPath returns the full path to the llama-cpp_v.conf file.
 func get_Llama_CPP_v_ConfigPath() (string, error) {
     // 1. Get the dynamic home directory path
@@ -580,10 +592,10 @@ func getYollamaCtxConfigPath() (string, error) {
     }
 
     // 2. Safely join the home directory with the .yollama folder
-    ollamaPath := filepath.Join(homeUserDir, ".yollama")
-    fmt.Println("Yollama directory:", ollamaPath)
+    yollamaPath := filepath.Join(homeUserDir, ".yollama")
+    fmt.Println("Yollama directory:", yollamaPath)
 
-    ctxConfigPath := filepath.Join(ollamaPath, "yollama_ctx.conf")
+    ctxConfigPath := filepath.Join(yollamaPath, "yollama_ctx.conf")
     return ctxConfigPath, err
 }
 
@@ -664,10 +676,10 @@ func getPathBatchNumConfig() (string, error) {
 	}
 
 	// 2. Safely join the home directory with the .yollama folder
-	ollamaPath := filepath.Join(homeUserDir, ".yollama")
-	fmt.Println("[YOLLAMA] | BatchNumConfig directory:", ollamaPath)
+	yollamaPath := filepath.Join(homeUserDir, ".yollama")
+	fmt.Println("[YOLLAMA] | BatchNumConfig directory:", yollamaPath)
 	
-	pathSchedBatchNumConfig := filepath.Join(ollamaPath, "yollamaloader.conf")
+	pathSchedBatchNumConfig := filepath.Join(yollamaPath, "yollamaloader.conf")
 	return pathSchedBatchNumConfig, err
 }
 
@@ -741,6 +753,85 @@ func appendBatchArgs(params []string, opts api.Options) []string {
 	}
 
 	params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
+
+	return params
+}
+
+// getPathThinkingConfig returns the full path to the yollama_think.conf file.
+func getPathThinkingConfig() (string, error) {
+    // Get the home directory path
+    homeUserDir, err := os.UserHomeDir()
+    if err != nil {
+        log.Fatalf("Error no such directory found: %v", err)
+    }
+
+    // Join the home directory with the .yollama folder
+    yollamaPath := filepath.Join(homeUserDir, ".yollama")
+    fmt.Println("Yollama directory:", yollamaPath)
+
+    thinkConfigPath := filepath.Join(yollamaPath, "yollama_think.conf")
+    return thinkConfigPath, err
+}
+
+// readThinkingConfig reads the config file and returns true if Thinking is enabled.
+// The file should contain either 1 (true) or 0 (false).
+func readThinkingConfig(tlsConfigPath string) (bool, error) {
+    // Read entire file into byte slice
+    thinkConfigData, err := os.ReadFile(tlsConfigPath)
+    if err != nil {
+        return false, fmt.Errorf("failed to read file: %w", err)
+    }
+
+    // Convert bytes to string (trim whitespace and newlines)
+    thinkValue := strings.TrimSpace(string(thinkConfigData))
+
+    // Convert string to integer
+    numThink, err := strconv.Atoi(thinkValue)
+    if err != nil {
+        return false, fmt.Errorf("error converting configured Thinking value str to num")
+    }
+
+    // 1 = true (enable Thinking), anything else (incl. 0) = false
+    return numThink == 1, nil
+}
+
+func getValueThinkingConfig() (bool, error) {
+    // Check for yollama_think.conf config for server mode
+    pathThinkConfig, err := getPathThinkingConfig()
+    if err != nil {
+        slog.Error("[YOLLAMA] | ❌ Failed to resolve TLS config path.", "error", err)
+        return false, err
+    } else {
+        slog.Info(fmt.Sprintf("[YOLLAMA] | ✅ Fetched configured TLS config path: %s\n", pathThinkConfig))
+    }
+
+    // Read the Thinking enable/disable value (1 = true, 0 = false)
+    thinkEnabled, err := readThinkingConfig(pathThinkConfig)
+    if err != nil {
+        // Fallback to plain thinking disabled
+        return false, fmt.Errorf("failed to retrieve thinking setting: %w", err)
+    } else if thinkEnabled {
+        slog.Info(fmt.Sprintf("[YOLLAMA] | ✅ Fetched configured TLS enabled value: %t", thinkEnabled))
+    } else {
+    	slog.Info(fmt.Sprintf("[YOLLAMA] | ✅ Fetched configured TLS enabled value: %t", thinkEnabled))
+    }
+
+    return thinkEnabled, nil
+}
+
+func appendThinkingArgs(params []string, opts api.Options) []string {
+	ThinkOpts, err := getValueThinkingConfig()
+	if err != nil {
+		fmt.Printf("[YOLLAMA] | ⚠️ (llama-server) Using Fallback Thinking/Reasoning setting: Thinking OFF\n")
+		// Fallback to Reasoning disabled
+		params = append(params, "--reasoning", "off", "--reasoning-format", "deepseek-legacy")
+	} else if (ThinkOpts) {
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using configured Thinking/Reasoning setting: Thinking ON\n")
+		params = append(params, "--reasoning", "on", "--reasoning-format", "deepseek-legacy")
+	} else {
+		fmt.Printf("[YOLLAMA] | ❔ (llama-server) Using configured Thinking/Reasoning setting: Thinking OFF\n")
+		params = append(params, "--reasoning", "off", "--reasoning-format", "deepseek-legacy")
+	}
 
 	return params
 }
