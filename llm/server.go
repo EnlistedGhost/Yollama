@@ -196,18 +196,10 @@ func MessageFromAPI(msg api.Message) Message {
 
 type CompletionRequest struct {
 	Prompt  string
-	Format  json.RawMessage
 	Media   []MediaData
+	Format  json.RawMessage
 	Options *api.Options
-
-	Grammar         string // set before sending the request to the subprocess
-	PreservedTokens []string // parser tokens to render as text; ignored by non-llama-server runners
-	LeadingBOS      string   // textual BOS emitted by Go rendering, if any
-
-	// Logprobs specifies whether to include log probabilities in the response
 	Logprobs bool
-
-	// TopLogprobs specifies the number of most likely alternative tokens to return (0-20)
 	TopLogprobs int
 }
 
@@ -216,7 +208,6 @@ type ChatRequest struct {
 	Format   json.RawMessage
 	Options  *api.Options
 	Think    *api.ThinkValue
-
 	Logprobs    bool
 	TopLogprobs int
 }

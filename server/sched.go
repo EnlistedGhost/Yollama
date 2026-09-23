@@ -233,34 +233,36 @@ func (s *Scheduler) processPending(ctx context.Context) {
 				}
 				s.loadedMu.Unlock()
 				if runner != nil {
-					if runner.needsReload(ctx, pending) {
-						slog.Debug("reloading", "runner", runner)
-						runnerToExpire = runner
-					} else {
-						// Runner is usable, return it
-						logutil.Trace("using existing loaded runner", "model", pendingKey)
-						pending.useLoadedRunner(runner, s.finishedReqCh)
-						break
-					}
+    				if runner.needsReload(ctx, pending) {
+        				slog.Debug("reloading", "runner", runner)
+        				runnerToExpire = runner
+    				} else {
+        				// Runner is usable, return it immediately and stop loop
+        				logutil.Trace("using existing loaded runner", "model", pendingKey)
+        				pending.useLoadedRunner(runner, s.finishedReqCh)
+        				break
+    				}
 				} else if maxRunners > 0 && loadedCount >= int(maxRunners) {
-					slog.Debug("max runners achieved, unloading one to make room", "runner_count", loadedCount)
-					runnerToExpire = s.findRunnerToUnload()
+    				slog.Debug("max runners achieved, unloading one to make room", "runner_count", loadedCount)
+    				runnerToExpire = s.findRunnerToUnload()
 				} else if pending.schedAttempts > 1 {
-					slog.Debug("queued runner found, unloading now scheduled for current runner!")
-					// Trigger an expiration to unload once it's done
-					runnerToExpire = s.findRunnerToUnload()
-					slog.Debug("setting current runner to expire immediately for queued runner", "runner", runnerToExpire, "refCount", runnerToExpire.refCount)
-					if runnerToExpire.expireTimer != nil {
-						runnerToExpire.expireTimer.Stop()
-						runnerToExpire.expireTimer = nil
-					}
-					runnerToExpire.sessionDuration = 0
-					if runnerToExpire.refCount <= 0 {
-						s.expiredCh <- runnerToExpire
-					}
-					runnerToExpire.refMu.Unlock()
-					// Wait for the unload to happen
-					slog.Debug("current runner waiting for queued runner to finish prior to loading", runnerToExpire)
+    				// trigger if runner == nil (cold load) 
+    				slog.Debug("queued runner found, unloading now scheduled for current runner!")
+    				runnerToExpire = s.findRunnerToUnload()
+    				// Safety check to prevent panic if nothing is loaded
+    				if runnerToExpire != nil { 
+        				slog.Debug("setting current runner to expire immediately for queued runner", "runner", runnerToExpire, "refCount", runnerToExpire.refCount)
+        				if runnerToExpire.expireTimer != nil {
+            				runnerToExpire.expireTimer.Stop()
+            				runnerToExpire.expireTimer = nil
+        				}
+        				runnerToExpire.sessionDuration = 0
+        				if runnerToExpire.refCount <= 0 {
+            				s.expiredCh <- runnerToExpire
+        				}
+        				runnerToExpire.refMu.Unlock()
+        				slog.Debug("current runner waiting for queued runner to finish prior to loading", runnerToExpire)
+    				}
 				} else {
 					// Either no models are loaded or below envconfig.MaxRunners
 					// Get a refreshed GPU list
