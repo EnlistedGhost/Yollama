@@ -845,17 +845,26 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 
 	timeout := 10 * time.Second
 	if runner.loading {
-		timeout = 5 * time.Minute // Initial load can take a long time for big models on slow systems...
+		timeout = 5 * time.Minute 
 	}
 
 	if runner.Options == nil {
 		return true
 	}
 
-	// Don't reload runner if num_gpu=-1 was provided
+	// Create safe shallow copies of target options to mutate safely during normalization
 	optsExisting := runner.Options.Runner
 	optsNew := req.opts.Runner
 
+	// 👇 FIX: Look at the incoming request flags directly instead of the runner
+	if req.numCtxAuto {
+		optsNew.NumCtx = optsExisting.NumCtx
+	}
+	if req.numBatchAuto {
+		optsNew.NumBatch = optsExisting.NumBatch
+	}
+
+	// Don't reload runner if num_gpu=-1 was provided
 	if optsNew.NumGPU < 0 {
 		optsExisting.NumGPU = -1
 		optsNew.NumGPU = -1
@@ -863,7 +872,11 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if !reflect.DeepEqual(runner.model.ProjectorPaths, req.model.ProjectorPaths) || !reflect.DeepEqual(optsExisting, optsNew) || runner.llama.Ping(ctx) != nil {
+
+	// Check if paths, evaluated settings, or a ping connection check fails
+	if !reflect.DeepEqual(runner.model.ProjectorPaths, req.model.ProjectorPaths) || 
+		!reflect.DeepEqual(optsExisting, optsNew) || 
+		runner.llama.Ping(ctx) != nil {
 		return true
 	}
 
