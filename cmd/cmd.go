@@ -12,7 +12,6 @@ import (
 	"io"
 	"log"
 	"log/slog"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -351,17 +350,7 @@ func loadOrUnloadModel(cmd *cobra.Command, opts *runOptions) error {
 		return err
 	}
 
-	req := &api.GenerateRequest{
-		Model:     opts.Model,
-		KeepAlive: opts.KeepAlive,
-
-		// pass Think here so we fail before getting to the chat prompt if the model doesn't support it
-		Think: opts.Think,
-	}
-
-	return client.Generate(cmd.Context(), req, func(r api.GenerateResponse) error {
-		return nil
-	})
+	return nil
 }
 
 // TODO: wire up this stop handler to API
@@ -606,12 +595,6 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		return generateEmbedding(cmd, name, opts.Prompt, opts.KeepAlive, truncate, dimensions)
 	}
 
-	if err := generate(cmd, opts); err != nil {
-		if handlePullUnAuthorizedError(err) {
-			return nil
-		}
-		return err
-	}
 	return nil
 }
 
@@ -639,61 +622,6 @@ func ListHandler(cmd *cobra.Command, args []string) error {
 
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"NAME", "ID", "SIZE", "MODIFIED"})
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetAlignment(tablewriter.ALIGN_LEFT)
-	table.SetHeaderLine(false)
-	table.SetBorder(false)
-	table.SetNoWhiteSpace(true)
-	table.SetTablePadding("    ")
-	table.AppendBulk(data)
-	table.Render()
-
-	return nil
-}
-
-func ListRunningHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	models, err := client.ListRunning(cmd.Context())
-	if err != nil {
-		return err
-	}
-
-	var data [][]string
-
-	for _, m := range models.Models {
-		if len(args) == 0 || strings.HasPrefix(m.Name, args[0]) {
-			var procStr string
-			switch {
-			case m.SizeVRAM == 0:
-				procStr = "100% CPU"
-			case m.SizeVRAM == m.Size:
-				procStr = "100% GPU"
-			case m.SizeVRAM > m.Size || m.Size == 0:
-				procStr = "Unknown"
-			default:
-				sizeCPU := m.Size - m.SizeVRAM
-				cpuPercent := math.Round(float64(sizeCPU) / float64(m.Size) * 100)
-				procStr = fmt.Sprintf("%d%%/%d%% CPU/GPU", int(cpuPercent), int(100-cpuPercent))
-			}
-
-			var until string
-			delta := time.Since(m.ExpiresAt)
-			if delta > 0 {
-				until = "Stopping..."
-			} else {
-				until = format.HumanTime(m.ExpiresAt, "Never")
-			}
-			ctxStr := strconv.Itoa(m.ContextLength)
-			data = append(data, []string{m.Name, m.Digest[:12], format.HumanBytes(m.Size), procStr, ctxStr, until})
-		}
-	}
-
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"NAME", "ID", "SIZE", "PROCESSOR", "CONTEXT", "UNTIL"})
 	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
 	table.SetAlignment(tablewriter.ALIGN_LEFT)
 	table.SetHeaderLine(false)
@@ -1475,128 +1403,6 @@ func getImageData(filePath string) ([]byte, error) {
 	return buf, nil
 }
 
-func generate(cmd *cobra.Command, opts runOptions) error {
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	p := progress.NewProgress(os.Stderr)
-	defer p.StopAndClear()
-
-	spinner := progress.NewSpinner("")
-	p.Add("", spinner)
-
-	var latest api.GenerateResponse
-
-	generateContext, ok := cmd.Context().Value(generateContextKey("context")).([]int)
-	if !ok {
-		generateContext = []int{}
-	}
-
-	ctx, cancel := context.WithCancel(cmd.Context())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT)
-
-	go func() {
-		<-sigChan
-		cancel()
-	}()
-
-	var state *displayResponseState = &displayResponseState{}
-	var thinkingContent strings.Builder
-	var thinkTagOpened bool = false
-	var thinkTagClosed bool = false
-
-	fn := func(response api.GenerateResponse) error {
-		latest = response
-		content := response.Response
-
-		if response.Response != "" {
-			p.StopAndClear()
-		}
-
-		if response.Thinking != "" {
-			if !thinkTagOpened {
-				fmt.Print(thinkingOutputOpeningText())
-				thinkTagOpened = true
-				thinkTagClosed = false
-			}
-			thinkingContent.WriteString(response.Thinking)
-			displayResponse(response.Thinking, opts.WordWrap, state)
-		}
-
-		if thinkTagOpened && !thinkTagClosed && (content != "") {
-			if !strings.HasSuffix(thinkingContent.String(), "\n") {
-				fmt.Println()
-			}
-			fmt.Print(thinkingOutputClosingText())
-			thinkTagOpened = false
-			thinkTagClosed = true
-			state = &displayResponseState{}
-		}
-
-		displayResponse(content, opts.WordWrap, state)
-
-		return nil
-	}
-
-	if opts.MultiModal {
-		opts.Prompt, opts.Images, err = extractFileData(opts.Prompt)
-		if err != nil {
-			return err
-		}
-	}
-
-	if opts.Format == "json" {
-		opts.Format = `"` + opts.Format + `"`
-	}
-
-	request := api.GenerateRequest{
-		Model:     opts.Model,
-		Prompt:    opts.Prompt,
-		Context:   generateContext,
-		Images:    opts.Images,
-		Format:    json.RawMessage(opts.Format),
-		System:    opts.System,
-		Options:   opts.Options,
-		KeepAlive: opts.KeepAlive,
-		Think:     opts.Think,
-	}
-
-	if err := client.Generate(ctx, &request, fn); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
-		return err
-	}
-
-	if opts.Prompt != "" {
-		fmt.Println()
-		fmt.Println()
-	}
-
-	if !latest.Done {
-		return nil
-	}
-
-	verbose, err := cmd.Flags().GetBool("verbose")
-	if err != nil {
-		return err
-	}
-
-	if verbose {
-		latest.Summary()
-	}
-
-	ctx = context.WithValue(cmd.Context(), generateContextKey("context"), latest.Context)
-	cmd.SetContext(ctx)
-
-	return nil
-}
-
 func RunServer(_ *cobra.Command, _ []string) error {
 	if err := initializeKeypair(); err != nil {
 		return err
@@ -1856,12 +1662,6 @@ func NewCLI() *cobra.Command {
 		RunE:    ListHandler,
 	}
 
-	psCmd := &cobra.Command{
-		Use:     "ps",
-		Short:   "List running models",
-		PreRunE: checkServerHeartbeat,
-		RunE:    ListRunningHandler,
-	}
 	copyCmd := &cobra.Command{
 		Use:     "cp SOURCE DESTINATION",
 		Short:   "Copy a model",
@@ -1899,7 +1699,6 @@ func NewCLI() *cobra.Command {
 		stopCmd,
 		pullCmd,
 		listCmd,
-		psCmd,
 		copyCmd,
 		deleteCmd,
 		serveCmd,
@@ -1944,7 +1743,6 @@ func NewCLI() *cobra.Command {
 		stopCmd,
 		pullCmd,
 		listCmd,
-		psCmd,
 		copyCmd,
 		deleteCmd,
 		gpuDiscoverCmd,

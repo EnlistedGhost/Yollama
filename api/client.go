@@ -232,25 +232,6 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 	return nil
 }
 
-// GenerateResponseFunc is a function that [Client.Generate] invokes every time
-// a response is received from the service. If this function returns an error,
-// [Client.Generate] will stop generating and return this error.
-type GenerateResponseFunc func(GenerateResponse) error
-
-// Generate generates a response for a given prompt. The req parameter should
-// be populated with prompt details. fn is called for each response (there may
-// be multiple responses, e.g. in case streaming is enabled).
-func (c *Client) Generate(ctx context.Context, req *GenerateRequest, fn GenerateResponseFunc) error {
-	return c.stream(ctx, http.MethodPost, "/api/generate", req, func(bts []byte) error {
-		var resp GenerateResponse
-		if err := json.Unmarshal(bts, &resp); err != nil {
-			return err
-		}
-
-		return fn(resp)
-	})
-}
-
 // ChatResponseFunc is a function that [Client.Chat] invokes every time
 // a response is received from the service. If this function returns an error,
 // [Client.Chat] will stop generating and return this error.
@@ -319,10 +300,10 @@ func (c *Client) List(ctx context.Context) (*ListResponse, error) {
 	return &lr, nil
 }
 
-// ListRunning lists running models.
-func (c *Client) ListRunning(ctx context.Context) (*ProcessResponse, error) {
+// Loaded lists loaded/running models.
+func (c *Client) Loaded(ctx context.Context) (*ProcessResponse, error) {
 	var lr ProcessResponse
-	if err := c.do(ctx, http.MethodGet, "/api/ps", nil, &lr); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/api/loaded", nil, &lr); err != nil {
 		return nil, err
 	}
 	return &lr, nil

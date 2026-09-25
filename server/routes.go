@@ -55,7 +55,7 @@ func writeModelRefParseError(c *gin.Context, err error, fallbackStatus int, fall
 
 // Set to either release or debug if development iteration
 var mode string = gin.ReleaseMode
-var ModelLoaded int = 0
+var modelLoadedNum int = 0
 
 type Server struct {
 	addr          net.Addr
@@ -738,6 +738,7 @@ func (s *Server) GenerateRoutes() (http.Handler, error) {
 	r.GET("/api/tags", s.ListHandler)
 	r.POST("/api/show", s.ShowHandler)
 	r.DELETE("/api/delete", s.DeleteHandler)
+	r.GET("/api/loaded", s.LoadedModelsHandler)
 
 	// Create
 	r.POST("/api/create", s.CreateHandler)
@@ -863,7 +864,7 @@ func Serve(ln net.Listener) error {
 		srvr.Close()
 		schedDone()
 		sched.unloadAllRunners()
-		ModelLoaded = 0
+		modelLoadedNum = 0
 		done()
 	}()
 
@@ -959,6 +960,20 @@ func Serve(ln net.Listener) error {
     return nil
 }
 
+func (s *Server) LoadedModelsHandler(c *gin.Context) {
+	// Get from scheduler
+	activeSnapshot := s.sched.loadedModels()
+
+	// If no models are loaded, return an empty array
+	if activeSnapshot == nil {
+		activeSnapshot = []loadedModel{}
+	}
+
+	// Respond back to client
+	c.JSON(http.StatusOK, gin.H{
+		"models": activeSnapshot,
+	})
+}
 
 func waitForStream(c *gin.Context, ch chan any) {
 	c.Header("Content-Type", "application/json")
@@ -1157,6 +1172,8 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	if fUnloadAndExpire {
 		msg = "Received model runner-expire request, Model is unloaded!"
 		slog.Info("[YOLLAMA] | ChatHandler:", msg)
+
+		return
 	}
 
 	capable := []model.Capability{model.CapabilityCompletion}
@@ -1198,6 +1215,8 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	if fLoadAndRunner {
 		msg = "Received model load request, Model is now loaded!"
 		slog.Info("[YOLLAMA] | ChatHandler:", msg)
+
+		return
 	}
 
 
