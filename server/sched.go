@@ -852,36 +852,51 @@ func (runner *runnerRef) needsReload(ctx context.Context, req *LlmRequest) bool 
 		return true
 	}
 
-	// Create safe shallow copies of target options to mutate safely during normalization
-	optsExisting := runner.Options.Runner
-	optsNew := req.opts.Runner
-
-	// 👇 FIX: Look at the incoming request flags directly instead of the runner
-	if req.numCtxAuto {
-		optsNew.NumCtx = optsExisting.NumCtx
-	}
-	if req.numBatchAuto {
-		optsNew.NumBatch = optsExisting.NumBatch
-	}
-
-	// Don't reload runner if num_gpu=-1 was provided
-	if optsNew.NumGPU < 0 {
-		optsExisting.NumGPU = -1
-		optsNew.NumGPU = -1
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// Check if paths, evaluated settings, or a ping connection check fails
-	if !reflect.DeepEqual(runner.model.ProjectorPaths, req.model.ProjectorPaths) || 
-		!reflect.DeepEqual(optsExisting, optsNew) || 
-		runner.llama.Ping(ctx) != nil {
+	// 1. Structural hardware architecture checks
+	if !reflect.DeepEqual(runner.model.ProjectorPaths, req.model.ProjectorPaths) {
+		slog.Info("[YOLLAMA] | Reload forced: Projector/multimodal paths changed")
 		return true
 	}
 
+	optsExisting := runner.Options.Runner
+	optsNew := req.opts.Runner
+
+	// 2. Context Window Validation (Only reload if user explicitly requests a mismatching non-auto size)
+	if !req.numCtxAuto && optsNew.NumCtx != optsExisting.NumCtx {
+		slog.Info("[YOLLAMA] | Reload forced: Explicit NumCtx mismatch", "loaded", optsExisting.NumCtx, "requested", optsNew.NumCtx)
+		return true
+	}
+
+	// 3. Batch Size Validation (Only reload if user explicitly requests a mismatching non-auto batch size)
+	if !req.numBatchAuto && optsNew.NumBatch != optsExisting.NumBatch {
+		slog.Info("[YOLLAMA] | Reload forced: Explicit NumBatch mismatch", "loaded", optsExisting.NumBatch, "requested", optsNew.NumBatch)
+		return true
+	}
+
+	// 4. GPU Layers Validation
+	if optsNew.NumGPU >= 0 && optsNew.NumGPU != optsExisting.NumGPU {
+		slog.Info("[YOLLAMA] | Reload forced: NumGPU layout changed", "loaded", optsExisting.NumGPU, "requested", optsNew.NumGPU)
+		return true
+	}
+
+	// 5. CPU Thread Count Validation
+	if optsNew.NumThread > 0 && optsNew.NumThread != optsExisting.NumThread {
+		slog.Info("[YOLLAMA] | Reload forced: CPU Thread count changed", "loaded", optsExisting.NumThread, "requested", optsNew.NumThread)
+		return true
+	}
+
+	// 6. Process Heartbeat Check
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if runner.llama.Ping(ctx) != nil {
+		slog.Info("[YOLLAMA] | Reload forced: Subprocess connection offline or crashed")
+		return true
+	}
+
+	slog.Debug("[YOLLAMA] | Warm instance verification passed! Reusing loaded runner process.")
 	return false
 }
+
 
 // Free memory reporting on GPUs can lag for a while even after the runner
 // exits, so we have to keep checking until we see the available memory recover,
