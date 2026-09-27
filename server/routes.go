@@ -1172,8 +1172,6 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	if fUnloadAndExpire {
 		msg = "Received model runner-expire request, Model is unloaded!"
 		slog.Info("[YOLLAMA] | ChatHandler:", msg)
-
-		return
 	}
 
 	capable := []model.Capability{model.CapabilityCompletion}
@@ -1215,8 +1213,6 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	if fLoadAndRunner {
 		msg = "Received model load request, Model is now loaded!"
 		slog.Info("[YOLLAMA] | ChatHandler:", msg)
-
-		return
 	}
 
 
