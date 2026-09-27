@@ -1215,7 +1215,6 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		slog.Info("[YOLLAMA] | ChatHandler:", msg)
 	}
 
-
 	s.handleNativeChat(c, req, m, r, opts, msgs)
 
 	return
@@ -1297,8 +1296,8 @@ func (s *Server) handleChatLoadModel(c *gin.Context, req api.ChatRequest, m *Mod
 }
 
 func (s *Server) handleChatUnloadModel(c *gin.Context, req api.ChatRequest, m *Model) (bool) {
-		// Unload model (Expire the runner)
-	if req.Messages[0].Content == "" {
+	// Unload model (Expire the runner)
+	if req.Messages[0].Content == "0x_unload" {
 		s.sched.expireRunner(m)
 
 		c.JSON(http.StatusOK, api.ChatResponse{
