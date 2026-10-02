@@ -127,7 +127,7 @@ func ParseNamedManifest(n model.Name) (*Manifest, error) {
 	var m Manifest
 	f, err := os.Open(p)
 	if err != nil {
-		slog.Info("[YOLLAMA] | ParseNamedManifest() - open file erorr")
+		slog.Info("[YOLLAMA] | ParseNamedManifest() - open file error")
 		return nil, err
 	}
 	defer f.Close()
@@ -184,7 +184,6 @@ func Manifests(continueOnError bool) (map[model.Name]*Manifest, error) {
 		return nil, err
 	}
 
-	// TODO(mxyng): use something less brittle
 	matches, err := filepath.Glob(filepath.Join(manifests, "*", "*", "*", "*"))
 	if err != nil {
 		return nil, err
