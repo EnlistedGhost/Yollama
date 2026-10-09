@@ -676,7 +676,7 @@ func checkIfFlagCompletion(finalCmd *Command, args []string, lastArg string) (*p
 				// Flag is shorthand
 				// We have to get the last shorthand flag name
 				// e.g. `-asd` => d to provide the correct completion
-				// https://github.com/spf13/cobra/issues/1257
+				// https://github.com/EnlistedGhost/Yollama/cobra/issues/1257
 				flagName = lastArg[index-1 : index]
 			}
 			lastArg = lastArg[index+1:]
@@ -702,7 +702,7 @@ func checkIfFlagCompletion(finalCmd *Command, args []string, lastArg string) (*p
 						// Flag is shorthand
 						// We have to get the last shorthand flag name
 						// e.g. `-asd` => d to provide the correct completion
-						// https://github.com/spf13/cobra/issues/1257
+						// https://github.com/EnlistedGhost/Yollama/cobra/issues/1257
 						flagName = prevArg[len(prevArg)-1:]
 					}
 					// Remove the uncompleted flag or else there could be an error created

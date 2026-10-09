@@ -13,9 +13,9 @@ Cobra is used in many Go projects such as [Kubernetes](https://kubernetes.io/),
 [Hugo](https://gohugo.io), and [GitHub CLI](https://github.com/cli/cli) to
 name a few. [This list](site/content/projects_using_cobra.md) contains a more extensive list of projects using Cobra.
 
-[![](https://img.shields.io/github/actions/workflow/status/spf13/cobra/test.yml?branch=main&longCache=true&label=Test&logo=github%20actions&logoColor=fff)](https://github.com/spf13/cobra/actions?query=workflow%3ATest)
-[![Go Reference](https://pkg.go.dev/badge/github.com/spf13/cobra.svg)](https://pkg.go.dev/github.com/spf13/cobra)
-[![Go Report Card](https://goreportcard.com/badge/github.com/spf13/cobra)](https://goreportcard.com/report/github.com/spf13/cobra)
+[![](https://img.shields.io/github/actions/workflow/status/spf13/cobra/test.yml?branch=main&longCache=true&label=Test&logo=github%20actions&logoColor=fff)](https://github.com/EnlistedGhost/Yollama/cobra/actions?query=workflow%3ATest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/EnlistedGhost/Yollama/cobra.svg)](https://pkg.go.dev/github.com/EnlistedGhost/Yollama/cobra)
+[![Go Report Card](https://goreportcard.com/badge/github.com/EnlistedGhost/Yollama/cobra)](https://goreportcard.com/report/github.com/EnlistedGhost/Yollama/cobra)
 [![Slack](https://img.shields.io/badge/Slack-cobra-brightgreen)](https://gophers.slack.com/archives/CD3LP1199)
 <hr>
 <div align="center" markdown="1">
@@ -84,7 +84,7 @@ have children commands and optionally run an action.
 
 In the example above, 'server' is the command.
 
-[More about cobra.Command](https://pkg.go.dev/github.com/spf13/cobra#Command)
+[More about cobra.Command](https://pkg.go.dev/github.com/EnlistedGhost/Yollama/cobra#Command)
 
 ## Flags
 
@@ -104,13 +104,13 @@ Using Cobra is easy. First, use `go get` to install the latest version
 of the library.
 
 ```
-go get -u github.com/spf13/cobra@latest
+go get -u github.com/EnlistedGhost/Yollama/cobra@latest
 ```
 
 Next, include Cobra in your application:
 
 ```go
-import "github.com/spf13/cobra"
+import "github.com/EnlistedGhost/Yollama/cobra"
 ```
 
 # Usage
@@ -121,10 +121,10 @@ develop a Cobra-based application. It is the easiest way to incorporate Cobra in
 It can be installed by running:
 
 ```
-go install github.com/spf13/cobra-cli@latest
+go install github.com/EnlistedGhost/Yollama/cobra-cli@latest
 ```
 
-For complete details on using the Cobra-CLI generator, please read [The Cobra Generator README](https://github.com/spf13/cobra-cli/blob/main/README.md)
+For complete details on using the Cobra-CLI generator, please read [The Cobra Generator README](https://github.com/EnlistedGhost/Yollama/cobra-cli/blob/main/README.md)
 
 For complete details on using the Cobra library, please read [The Cobra User Guide](site/content/user_guide.md).
 

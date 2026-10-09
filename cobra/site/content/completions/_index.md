@@ -18,7 +18,7 @@ provide your own, which will take precedence over the default one. (This also pr
 backwards-compatibility with programs that already have their own `completion` command.)
 
 If you are using the `cobra-cli` generator,
-which can be found at [spf13/cobra-cli](https://github.com/spf13/cobra-cli),
+which can be found at [spf13/cobra-cli](https://github.com/EnlistedGhost/Yollama/cobra-cli),
 you can create a completion command by running
 
 ```bash

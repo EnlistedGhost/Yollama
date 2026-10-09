@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
+	"github.com/EnlistedGhost/Yollama/cobra"
 )
 
 func assertNoErr(t *testing.T, e error) {

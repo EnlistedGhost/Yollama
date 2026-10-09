@@ -241,7 +241,7 @@ func TestRpad(t *testing.T) {
 // default configuration that code path can be proven to be unreachable by
 // the linker.
 //
-// See also: https://github.com/spf13/cobra/pull/1956
+// See also: https://github.com/EnlistedGhost/Yollama/cobra/pull/1956
 func TestDeadcodeElimination(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("go tool nm fails on windows")
@@ -262,7 +262,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
+	"github.com/EnlistedGhost/Yollama/cobra"
 )
 
 var rootCmd = &cobra.Command{

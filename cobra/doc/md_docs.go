@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/EnlistedGhost/Yollama/cobra"
 )
 
 const markdownExtension = ".md"
