@@ -32,7 +32,7 @@ import (
 	"github.com/containerd/console"
 	"github.com/mattn/go-runewidth"
 	"github.com/olekukonko/tablewriter"
-	"github.com/spf13/cobra"
+	"github.com/EnlistedGhost/Yollama/cobra"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"

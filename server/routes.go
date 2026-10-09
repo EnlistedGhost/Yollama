@@ -559,14 +559,29 @@ func (s *Server) ListHandler(c *gin.Context) {
 		return
 	}
 
+	// 1. Check raw active registry counts before fetching cache data
+	rawManifests, manifestErr := manifest.Manifests(true)
+	if manifestErr == nil {
+		slog.Info("[YOLLAMA DEBUG] | Direct manifest directory file count fetched:", "count", len(rawManifests))
+	} else {
+		slog.Error("[YOLLAMA DEBUG] | Direct manifest sweep failed:", "error", manifestErr)
+	}
+
+	// 2. Query cache layer state length
+	slog.Info("[YOLLAMA DEBUG] | Querying model list cache current size...", "cache_len", s.modelCaches.modelList.Len())
+
+	// 3. Process standard call
 	models, err := s.modelCaches.modelList.List(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	slog.Info("[YOLLAMA DEBUG] | Total elements exiting ListHandler to client engine payload:", "count", len(models))
+
 	c.JSON(http.StatusOK, api.ListResponse{Models: models})
 }
+
 
 func (s *Server) CopyHandler(c *gin.Context) {
 	var r api.CopyRequest
@@ -816,7 +831,7 @@ func Serve(ln net.Listener) error {
 				return err
 			}
 
-			manifestsPath, err := manifest.Path()
+			manifestsPath, _, _, err := manifest.Path()
 			if err != nil {
 				return err
 			}
@@ -1176,7 +1191,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 
 	capable := []model.Capability{model.CapabilityCompletion}
 	modelCaps := m.Capabilities()
-	// Overried "OFF" thinking if user requested "ON"
+	// Override "OFF" thinking if user requested "ON"
 	req.Think = nil
 	if slices.Contains(modelCaps, model.CapabilityThinking) {
 		if req.Think != nil {

@@ -383,10 +383,30 @@ func (m *Model) String() string {
 	return modelfile.String()
 }
 
+func resolveModelManifest(name string) (model.Name, *manifest.Manifest, error) {
+	n := model.ParseName(name)
+	
+	// If the name is a short name (unqualified), resolve it to its existing full path
+	if !n.IsFullyQualified() {
+		existing, err := getExistingName(n)
+		if err != nil {
+			return model.Name{}, nil, fmt.Errorf("failed to resolve unqualified name %q: %w", name, err)
+		}
+		n = existing
+	}
+
+	// Fetch the manifest cleanly using our dual-path system
+	mf, err := manifest.ParseNamedManifest(n)
+	if err != nil {
+		return model.Name{}, nil, err
+	}
+
+	return n, mf, nil
+}
+
 func CheckForModel(name string) (*Model, error) {
 	slog.Info("[YOLLAMA] | CheckForModel() - Function Called")
-	n := model.ParseName(name)
-	mf, err := manifest.ParseNamedManifest(n)
+	n, mf, err := resolveModelManifest(name)
 	if err != nil {
 		slog.Info("[YOLLAMA] | CheckForModel() - Name resolution error")
 		return nil, err
@@ -425,8 +445,7 @@ func CheckForModel(name string) (*Model, error) {
 
 func GetModel(name string) (*Model, error) {
 	slog.Info("[YOLLAMA] | GetModel() - Function Called")
-	n := model.ParseName(name)
-	mf, err := manifest.ParseNamedManifest(n)
+	n, mf, err := resolveModelManifest(name)
 	if err != nil {
 		slog.Info("[YOLLAMA] | GetModel() - Name resolution error")
 		return nil, err
@@ -563,7 +582,7 @@ func CopyModel(src, dst model.Name) error {
 		return nil
 	}
 
-	manifests, err := manifest.Path()
+	manifests, _, _, err := manifest.Path()
 	if err != nil {
 		return err
 	}

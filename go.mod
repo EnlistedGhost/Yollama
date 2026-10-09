@@ -12,7 +12,6 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.10.0
 	github.com/x448/float16 v0.8.4
 	golang.org/x/sync v0.17.0
@@ -41,6 +40,7 @@ require (
 )
 
 require (
+	github.com/EnlistedGhost/Yollama/cobra v0.0.0-20261009150845-579bd9fb975a // indirect
 	github.com/apache/arrow/go/arrow v0.0.0-20211112161151-bc219186db40 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -94,7 +94,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	golang.org/x/arch v0.8.0 // indirect

@@ -25,7 +25,6 @@ const (
 	defaultCloudProxyBaseURL      = "https://yollama.com:443"
 	defaultCloudProxySigningHost  = "yollama.com"
 	cloudProxyBaseURLEnv          = "YOLLAMA_CLOUD_BASE_URL"
-	legacyCloudAnthropicKey       = "legacy_cloud_anthropic_web_search"
 	cloudProxyClientVersionHeader = "X-Yollama-Client-Version"
 
 	// maxDecompressedBodySize limits the size of a decompressed request body
@@ -87,10 +86,6 @@ func cloudPassthroughMiddleware(disabledOperation string) gin.HandlerFunc {
 			c.Request.Header.Del("Content-Encoding")
 		}
 
-		// TODO(drifkin): Avoid full-body buffering here for model detection.
-		// A future optimization can parse just enough JSON to read "model" (and
-		// optionally short-circuit cloud-disabled explicit-cloud requests) while
-		// preserving raw passthrough semantics.
 		body, err := readRequestBody(c.Request)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -115,14 +110,6 @@ func cloudPassthroughMiddleware(disabledOperation string) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			c.Abort()
 			return
-		}
-
-		if c.Request.URL.Path == "/v1/messages" {
-			if hasAnthropicWebSearchTool(body) {
-				c.Set(legacyCloudAnthropicKey, true)
-				c.Next()
-				return
-			}
 		}
 
 		proxyCloudRequest(c, normalizedBody, disabledOperation)
@@ -151,9 +138,6 @@ func cloudModelPathPassthroughMiddleware(disabledOperation string) gin.HandlerFu
 }
 
 func proxyCloudJSONRequest(c *gin.Context, payload any, disabledOperation string) {
-	// TEMP(drifkin): we currently split out this `WithPath` method because we are
-	// mapping `/v1/messages` + web_search to `/api/chat` temporarily. Once we
-	// stop doing this, we can inline this method.
 	proxyCloudJSONRequestWithPath(c, payload, c.Request.URL.Path, disabledOperation)
 }
 
@@ -233,29 +217,6 @@ func extractModelField(body []byte) (string, bool) {
 	return model, model != ""
 }
 
-func hasAnthropicWebSearchTool(body []byte) bool {
-	if len(body) == 0 {
-		return false
-	}
-
-	var payload struct {
-		Tools []struct {
-			Type string `json:"type"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return false
-	}
-
-	for _, tool := range payload.Tools {
-		if strings.HasPrefix(strings.TrimSpace(tool.Type), "web_search") {
-			return true
-		}
-	}
-
-	return false
-}
-
 func writeCloudUnauthorized(c *gin.Context) {
 	signinURL, err := cloudProxySigninURL()
 	if err != nil {
@@ -322,7 +283,7 @@ func resolveCloudProxyBaseURL(rawOverride string, runMode string) (baseURL strin
 	}
 
 	loopback := isLoopbackHost(host)
-	if runMode == gin.ReleaseMode && !loopback {
+	if !loopback {
 		return "", "", false, fmt.Errorf("non-loopback cloud override is not allowed in release mode")
 	}
 	if !loopback && !strings.EqualFold(u.Scheme, "https") {
@@ -385,8 +346,6 @@ func copyProxyResponseBody(dst http.ResponseWriter, src io.Reader) error {
 				return writeErr
 			}
 			if canFlush {
-				// TODO(drifkin): Consider conditional flushing so non-streaming
-				// responses don't flush every write and can optimize throughput.
 				flusher.Flush()
 			}
 		}

@@ -371,7 +371,14 @@ func readModelListConfig(mf *manifest.Manifest) (model.ConfigV2, error) {
 		return cfg, nil
 	}
 
-	f, err := mf.Config.Open()
+	// Resolve the configuration path using our dual-path aware BlobsPath
+	blobPath, err := manifest.BlobsPath(mf.Config.Digest)
+	if err != nil {
+		return cfg, err
+	}
+
+	// Open the resolved path directly
+	f, err := os.Open(blobPath)
 	if err != nil {
 		return cfg, err
 	}
@@ -380,14 +387,12 @@ func readModelListConfig(mf *manifest.Manifest) (model.ConfigV2, error) {
 	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
 		return cfg, err
 	}
-
 	return cfg, nil
 }
 
 func readModelListLayers(mf *manifest.Manifest, summary *modelListSummary) (string, int, error) {
 	var modelPath string
 	var projectorCount int
-	//tmpl := ollamatemplate.DefaultTemplate
 
 	for _, layer := range mf.Layers {
 		switch layer.MediaType {
@@ -408,14 +413,17 @@ func readModelListLayers(mf *manifest.Manifest, summary *modelListSummary) (stri
 			}
 			LOCALpath, err := os.ReadFile(filename)
 			if err != nil {
-				return "", 0, err
+				// Downgrade to a debug log so missing auxiliary template files 
+				// do not crash the initialization indexer
+				slog.Debug("Yollama could not read model template blob file", "path", filename, "error", err)
+				continue 
 			}
-			fmt.Println("Yollama has read model blob file:", LOCALpath)
+			fmt.Println("Yollama has read model blob file length:", len(LOCALpath))
 		}
 	}
-
 	return modelPath, projectorCount, nil
 }
+
 
 type modelListGGUF struct {
 	Capabilities    []model.Capability

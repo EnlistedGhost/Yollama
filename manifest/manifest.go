@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/EnlistedGhost/Yollama/types/model"
 )
@@ -62,13 +63,24 @@ func (m *Manifest) Remove() error {
 	if err := os.Remove(m.filepath); err != nil {
 		return err
 	}
-
-	manifests, err := Path()
+	
+	// Properly capture all 4 values returned by your updated Path() function
+	primaryPath, auxPath, _, err := Path()
 	if err != nil {
 		return err
 	}
-
-	return PruneDirectory(manifests)
+	
+	// Clean up primary empty folders
+	if err := PruneDirectory(primaryPath); err != nil {
+		return err
+	}
+	
+	// Clean up auxiliary empty folders if configured
+	if auxPath != "None" && auxPath != "" {
+		_ = PruneDirectory(auxPath)
+	}
+	
+	return nil
 }
 
 func (m *Manifest) RemoveLayers() error {
@@ -110,56 +122,57 @@ func (m *Manifest) RemoveLayers() error {
 }
 
 func ParseNamedManifest(n model.Name) (*Manifest, error) {
-	// slog.Info("[YOLLAMA] | ParseNamedManifest() - Started")
 	if !n.IsFullyQualified() {
-		slog.Info("[YOLLAMA] | ParseNamedManifest() - qualification error")
 		return nil, model.Unqualified(n)
 	}
 
-	manifests, err := Path()
+	// Use our new smart looker instead of forcing a primary path join
+	p, err := PathForName(n)
 	if err != nil {
-		slog.Info("[YOLLAMA] | ParseNamedManifest() - pathing error")
 		return nil, err
 	}
-
-	p := filepath.Join(manifests, n.Filepath())
 
 	var m Manifest
 	f, err := os.Open(p)
 	if err != nil {
-		slog.Info("[YOLLAMA] | ParseNamedManifest() - open file error")
 		return nil, err
 	}
 	defer f.Close()
 
 	fi, err := f.Stat()
 	if err != nil {
-		slog.Info("[YOLLAMA] | ParseNamedManifest() - stat error")
 		return nil, err
 	}
 
 	sha256sum := sha256.New()
 	if err := json.NewDecoder(io.TeeReader(f, sha256sum)).Decode(&m); err != nil {
-		slog.Info("[YOLLAMA] | ParseNamedManifest() - json decoder error")
 		return nil, err
 	}
 
 	m.filepath = p
 	m.fi = fi
 	m.digest = hex.EncodeToString(sha256sum.Sum(nil))
-
 	return &m, nil
 }
 
 func WriteManifest(name model.Name, config Layer, layers []Layer) error {
-	manifests, err := Path()
+	// 1. Explicitly unpack all 4 values to satisfy your updated Path() signature
+	primaryPath, auxPath, fAux, err := Path()
 	if err != nil {
 		return err
 	}
 
-	p := filepath.Join(manifests, name.Filepath())
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
+	p := ""
+	if fAux == true {
+		p = filepath.Join(auxPath, name.Filepath())
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+	} else {
+		p = filepath.Join(primaryPath, name.Filepath())
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
 	}
 
 	f, err := os.Create(p)
@@ -178,53 +191,93 @@ func WriteManifest(name model.Name, config Layer, layers []Layer) error {
 	return json.NewEncoder(f).Encode(m)
 }
 
+
 func Manifests(continueOnError bool) (map[model.Name]*Manifest, error) {
-	manifests, err := Path()
+	primaryPath, auxPath, inclAux, err := Path()
 	if err != nil {
 		return nil, err
 	}
 
-	matches, err := filepath.Glob(filepath.Join(manifests, "*", "*", "*", "*"))
-	if err != nil {
-		return nil, err
+	var targetDirs []string
+	if primaryPath != "" && primaryPath != "None" {
+		targetDirs = append(targetDirs, primaryPath)
+	}
+	if inclAux && auxPath != "" && auxPath != "None" {
+		targetDirs = append(targetDirs, auxPath)
 	}
 
 	ms := make(map[model.Name]*Manifest)
-	for _, match := range matches {
-		fi, err := os.Stat(match)
+
+	// Define a custom recursive function that follows symlinks
+	var walkFn func(basePath, currentPath string) error
+	walkFn = func(basePath, currentPath string) error {
+		entries, err := os.ReadDir(currentPath)
 		if err != nil {
-			return nil, err
+			if continueOnError {
+				return nil
+			}
+			return err
 		}
 
-		if !fi.IsDir() {
-			rel, err := filepath.Rel(manifests, match)
+		for _, entry := range entries {
+			fullPath := filepath.Join(currentPath, entry.Name())
+			
+			// Use os.Stat to resolve the true target behind symlinks
+			fi, err := os.Stat(fullPath)
 			if err != nil {
-				if !continueOnError {
-					return nil, fmt.Errorf("%s %w", match, err)
+				if continueOnError {
+					continue
 				}
-				slog.Warn("bad filepath", "path", match, "error", err)
-				continue
+				return err
 			}
 
-			n := model.ParseNameFromFilepath(rel)
-			if !n.IsValid() {
-				if !continueOnError {
-					return nil, fmt.Errorf("%s %w", rel, err)
+			if fi.IsDir() {
+				// Recurse into subdirectories
+				if err := walkFn(basePath, fullPath); err != nil && !continueOnError {
+					return err
 				}
-				slog.Warn("bad manifest name", "path", rel)
-				continue
-			}
-
-			m, err := ParseNamedManifest(n)
-			if err != nil {
-				if !continueOnError {
-					return nil, fmt.Errorf("%s %w", n, err)
+			} else {
+				// We found a manifest file! Compute the relative tracking path
+				rel, err := filepath.Rel(basePath, fullPath)
+				if err != nil {
+					if continueOnError {
+						continue
+					}
+					return err
 				}
-				slog.Warn("bad manifest", "name", n, "error", err)
-				continue
-			}
 
-			ms[n] = m
+				n := model.ParseNameFromFilepath(rel)
+				if !n.IsValid() {
+					n = model.ParseName(strings.ReplaceAll(rel, string(filepath.Separator), "/"))
+					if !n.IsValid() {
+						if continueOnError {
+							continue
+						}
+						return fmt.Errorf("invalid name resolution: %s", rel)
+					}
+				}
+
+				m, err := ParseNamedManifest(n)
+				if err != nil {
+					if continueOnError {
+						continue
+					}
+					return fmt.Errorf("%s %w", n, err)
+				}
+
+				ms[n] = m
+			}
+		}
+		return nil
+	}
+
+	// Scan each target directory using our custom walker
+	for _, baseManifestDir := range targetDirs {
+		// Log out exactly what directories Yollama is checking to be 100% sure
+		fmt.Printf("[YOLLAMA DEBUG] | Actively sweeping directory: %s\n", baseManifestDir)
+		
+		if err := walkFn(baseManifestDir, baseManifestDir); err != nil && !continueOnError {
+			return nil, err
 		}
 	}
 
