@@ -22,7 +22,6 @@ import (
 
 	"github.com/EnlistedGhost/Yollama/api"
 	"github.com/EnlistedGhost/Yollama/envconfig"
-	"github.com/EnlistedGhost/Yollama/fs/gguf"
 	"github.com/EnlistedGhost/Yollama/manifest"
 	"github.com/EnlistedGhost/Yollama/parser"
 	"github.com/EnlistedGhost/Yollama/template"
@@ -68,8 +67,10 @@ type Model struct {
 
 	Template *template.Template
 
-	capabilities       []model.Capability
-	capabilitiesCached bool
+	// Metadata of the model blob and of each projector, read from their
+	// metadata files when the model is loaded.
+	metadata          ggufMetadata
+	projectorMetadata []ggufMetadata
 }
 
 func (m *Model) isGGUF() bool {
@@ -85,12 +86,9 @@ func appendCapability(capabilities []model.Capability, capability model.Capabili
 
 // Capabilities returns the capabilities that the model supports
 func (m *Model) Capabilities() []model.Capability {
+
 	capabilities := []model.Capability{}
 	var modelArch string
-
-	if m.capabilitiesCached {
-		return slices.Clone(m.capabilities)
-	}
 
 	capabilities = m.configCapabilities(capabilities)
 	capabilities, modelArch = m.ggufCapabilities(capabilities)
@@ -119,31 +117,22 @@ func (m *Model) ggufCapabilities(capabilities []model.Capability) ([]model.Capab
 		return capabilities, ""
 	}
 
-	f, err := gguf.Open(m.ModelPath)
-	if err != nil {
-		slog.Error("couldn't open model file", "error", err)
-		return capabilities, ""
-	}
-	defer f.Close()
+	capabilities = chatTemplateCapabilities(capabilities, m.metadata.String("tokenizer.chat_template"))
 
-	modelArch := f.KeyValue("general.architecture").String()
-
-	capabilities = chatTemplateCapabilities(capabilities, f.KeyValue("tokenizer.chat_template").String())
-
-	if f.KeyValue("pooling_type").Valid() {
+	if m.metadata.Valid("pooling_type") {
 		capabilities = appendCapability(capabilities, model.CapabilityEmbedding)
 	} else {
 		// If no embedding is specified, we assume the model supports completion.
 		capabilities = appendCapability(capabilities, model.CapabilityCompletion)
 	}
-	if f.KeyValue("vision.block_count").Valid() {
+	if m.metadata.Valid("vision.block_count") {
 		capabilities = appendCapability(capabilities, model.CapabilityVision)
 	}
-	if f.KeyValue("audio.block_count").Valid() {
+	if m.metadata.Valid("audio.block_count") {
 		capabilities = appendCapability(capabilities, model.CapabilityAudio)
 	}
 
-	return capabilities, modelArch
+	return capabilities, m.metadata.String("general.architecture")
 }
 
 func chatTemplateCapabilities(capabilities []model.Capability, chatTemplate string) []model.Capability {
@@ -181,16 +170,10 @@ func (m *Model) projectorCapabilities(capabilities []model.Capability) []model.C
 	}
 
 	capabilities = appendCapability(capabilities, model.CapabilityVision)
-	for _, projectorPath := range m.ProjectorPaths {
-		f, err := gguf.Open(projectorPath)
-		if err != nil {
-			slog.Error("couldn't open projector file", "error", err)
-			continue
-		}
-		if projectorHasAudio(f) && !projectorSuppressesAudioCapability(f) {
+	for _, md := range m.projectorMetadata {
+		if projectorHasAudio(md) && !projectorSuppressesAudioCapability(md) {
 			capabilities = appendCapability(capabilities, model.CapabilityAudio)
 		}
-		f.Close()
 	}
 
 	return capabilities
@@ -243,22 +226,21 @@ func suppressAudioCapability(m *Model, arch string) bool {
 	return false
 }
 
-func projectorHasAudio(f *gguf.File) bool {
-	if f.KeyValue("has_audio_encoder").Bool() {
-		return true
-	}
-
-	for _, kv := range f.KeyValues() {
-		if strings.HasSuffix(kv.Key, ".has_audio_encoder") && kv.Bool() {
-			return true
+func projectorHasAudio(md ggufMetadata) bool {
+	// read directly: Keys reports qualified keys, the accessors qualify theirs
+	for _, key := range md.Keys() {
+		if key == "has_audio_encoder" || strings.HasSuffix(key, ".has_audio_encoder") {
+			if b, ok := md.KV[key].(bool); ok && b {
+				return true
+			}
 		}
 	}
 
 	return false
 }
 
-func projectorSuppressesAudioCapability(f *gguf.File) bool {
-	switch f.KeyValue("vision.projector_type").String() {
+func projectorSuppressesAudioCapability(md ggufMetadata) bool {
+	switch md.String("vision.projector_type") {
 	case "gemma3nv":
 		return true
 	}
@@ -419,6 +401,13 @@ func CheckForModel(name string) (*Model, error) {
 	}
 
 	for _, layer := range mf.Layers {
+		// Nothing below reads a tensor layer, and resolving a path costs a
+		// syscall each. Named rather than allow listing the types below, so a new
+		// layer type is slower here instead of silently unread.
+		if layer.MediaType == manifest.MediaTypeImageTensor {
+			continue
+		}
+
 		normalizedType := NormalizeMediaType(layer.MediaType)
 		filename, err := manifest.BlobsPath(layer.Digest)
 		if err != nil {
@@ -429,12 +418,10 @@ func CheckForModel(name string) (*Model, error) {
 		if normalizedType == "application/vnd.yollama.image.model" {
 			m.ModelPath = filename
 			if m.isGGUF() {
-				f, err := gguf.Open(filename)
 				if err != nil {
 					slog.Error("[YOLLAMA] | CheckForModel - couldn't open model file", "error", err)
 					return nil, err
 				}
-				f.Close()
 				break
 			}
 		}
@@ -493,18 +480,23 @@ func GetModel(name string) (*Model, error) {
 			m.ModelPath = filename
 			m.ParentModel = layer.From
 			if m.isGGUF() {
-				f, err := gguf.Open(filename)
+				md, err := readGGUFMetadata(layer.Digest)
 				if err != nil {
-					slog.Error("couldn't open model file", "error", err)
+					slog.Error("couldn't read model metadata", "error", err)
 					break
 				}
-				ggufChatTemplate = f.KeyValue("tokenizer.chat_template").String()
+				m.metadata = md
+				ggufChatTemplate = md.String("tokenizer.chat_template")
 				m.HasChatTemplate = ggufChatTemplate != ""
-				modelHasPooling = f.KeyValue("pooling_type").Valid()
-				f.Close()
+				modelHasPooling = md.Valid("pooling_type")
 			}
 		case "application/vnd.yollama.image.projector":
 			m.ProjectorPaths = append(m.ProjectorPaths, filename)
+			if md, err := readGGUFMetadata(layer.Digest); err != nil {
+				slog.Error("couldn't read projector metadata", "error", err)
+			} else {
+				m.projectorMetadata = append(m.projectorMetadata, md)
+			}
 		case "application/vnd.yollama.image.prompt",
 			"application/vnd.yollama.image.template":
 			bts, err := os.ReadFile(filename)
@@ -631,10 +623,11 @@ func deleteUnusedLayers(deleteMap map[string]struct{}) error {
 			slog.Info(fmt.Sprintf("couldn't get file path for '%s': %v", k, err))
 			continue
 		}
-		if err := os.Remove(fp); err != nil {
+		if err := os.Remove(fp); err != nil && !errors.Is(err, os.ErrNotExist) {
 			slog.Info(fmt.Sprintf("couldn't remove file '%s': %v", fp, err))
 			continue
 		}
+		removeGGUFMetadata(k)
 	}
 
 	return nil
@@ -691,6 +684,7 @@ func PruneLayers() error {
 		slog.Error(fmt.Sprintf("couldn't remove unused layers: %v", err))
 		return nil
 	}
+	pruneGGUFMetadata()
 
 	slog.Info(fmt.Sprintf("total unused blobs removed: %d", len(deleteMap)))
 
@@ -772,6 +766,7 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 				if err := os.Remove(fp); err != nil {
 					slog.Info(fmt.Sprintf("couldn't remove file with digest mismatch '%s': %v", fp, err))
 				}
+				removeGGUFMetadata(layer.Digest)
 			}
 			return err
 		}

@@ -252,8 +252,6 @@ func (s *Server) PullHandler(c *gin.Context) {
 			ch <- gin.H{"error": err.Error()}
 			return
 		}
-
-		s.refreshModelListCache(name)
 	}()
 
 	if req.Stream != nil && !*req.Stream {
@@ -338,9 +336,9 @@ func (s *Server) DeleteHandler(c *gin.Context) {
 		return
 	}
 
-	s.deleteModelListCache(n)
-
-	if err := m.RemoveLayers(); err != nil {
+	removed, err := m.RemoveLayers()
+	removeGGUFMetadata(removed...)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -554,30 +552,25 @@ func selectedModelTemplate(m *Model, kv ggml.KV) string {
 }
 
 func (s *Server) ListHandler(c *gin.Context) {
-	if s.modelCaches == nil || s.modelCaches.modelList == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "model list cache unavailable"})
-		return
-	}
-
 	// 1. Check raw active registry counts before fetching cache data
-	rawManifests, manifestErr := manifest.Manifests(true)
-	if manifestErr == nil {
-		slog.Info("[YOLLAMA DEBUG] | Direct manifest directory file count fetched:", "count", len(rawManifests))
-	} else {
-		slog.Error("[YOLLAMA DEBUG] | Direct manifest sweep failed:", "error", manifestErr)
-	}
+	//rawManifests, manifestErr := manifest.Manifests(true)
+	//if manifestErr == nil {
+	//	slog.Info("[YOLLAMA DEBUG] | Direct manifest directory file count fetched:", "count", len(rawManifests))
+	//} else {
+	//	slog.Error("[YOLLAMA DEBUG] | Direct manifest sweep failed:", "error", manifestErr)
+	//}
 
 	// 2. Query cache layer state length
-	slog.Info("[YOLLAMA DEBUG] | Querying model list cache current size...", "cache_len", s.modelCaches.modelList.Len())
+	//slog.Info("[YOLLAMA DEBUG] | Querying model list cache current size...", "cache_len", s.modelCaches.modelList.Len())
 
 	// 3. Process standard call
-	models, err := s.modelCaches.modelList.List(c.Request.Context())
+	models, err := listModels(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	slog.Info("[YOLLAMA DEBUG] | Total elements exiting ListHandler to client engine payload:", "count", len(models))
+	//slog.Info("[YOLLAMA DEBUG] | Total elements exiting ListHandler to client engine payload:", "count", len(models))
 
 	c.JSON(http.StatusOK, api.ListResponse{Models: models})
 }
@@ -619,8 +612,6 @@ func (s *Server) CopyHandler(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model %q not found", r.Source)})
 	} else if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-	} else {
-		s.refreshModelListCache(dst)
 	}
 }
 
@@ -1170,7 +1161,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	m, err := s.getModel(name.String())
+	m, err := GetModel(name.String())
 	if err != nil {
 		switch {
 		case os.IsNotExist(err):
