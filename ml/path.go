@@ -13,9 +13,9 @@ type libYollamaPathSearch struct {
 	goarch     string
 }
 
-// LibYollamaPath is the root used to find bundled llama.cpp and MLX runtime
-// libraries. GPU-specific libraries live in backend subdirectories such as
-// cuda_v12, rocm_v7_2, vulkan, and mlx_cuda_v13.
+// LibYollamaPath is the root used to find bundled llama.cpp runtime
+// libraries. GPU-specific libraries live in backend sub-directories 
+// such as cuda_v12, rocm_v7_2, vulkan, and mlx_cuda_v13.
 var LibYollamaPath = func() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -94,7 +94,7 @@ func libYollamaPathCandidates(search libYollamaPathSearch) []string {
 		}
 		addLocalLibYollamaPaths(add, exeDir, goos, goarch)
 		if goos == "darwin" {
-			// macOS release artifacts colocate native helpers with yollama.
+			// macOS release artifacts co-locate native helpers with yollama.
 			add(exeDir)
 		}
 	}
