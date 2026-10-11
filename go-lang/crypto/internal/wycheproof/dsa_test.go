@@ -8,7 +8,7 @@ import (
 	"crypto/dsa"
 	"testing"
 
-	wdsa "golang.org/x/crypto/internal/wycheproof/internal/dsa"
+	wdsa "github.com/EnlistedGhost/Yollama/go-lang/crypto/internal/wycheproof/internal/dsa"
 )
 
 func TestDsa(t *testing.T) {

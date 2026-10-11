@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/crypto/ssh"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh"
 )
 
 func skipIfIssue64959(t *testing.T, err error) {
@@ -269,7 +269,7 @@ func TestClientAuthDisconnect(t *testing.T) {
 	// This key has been generated with following ssh-keygen command and
 	// used exclusively in this unit test:
 	// $ ssh-keygen -t RSA -b 2048 -f /tmp/static_key \
-	//   -C "Static RSA key for golang.org/x/crypto/ssh unit test"
+	//   -C "Static RSA key for github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh unit test"
 
 	const privKeyData = `-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABFwAAAAdzc2gtcn

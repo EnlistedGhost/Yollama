@@ -17,7 +17,7 @@ import (
 	"math/big"
 	"slices"
 
-	"golang.org/x/crypto/curve25519"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/curve25519"
 )
 
 const (

@@ -9,8 +9,8 @@ import (
 	"net"
 	"os"
 
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh/agent"
 )
 
 func ExampleNewClient() {

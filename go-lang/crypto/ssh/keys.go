@@ -30,7 +30,7 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/crypto/ssh/internal/bcrypt_pbkdf"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh/internal/bcrypt_pbkdf"
 )
 
 // Public key algorithms names. These values can appear in PublicKey.Type,

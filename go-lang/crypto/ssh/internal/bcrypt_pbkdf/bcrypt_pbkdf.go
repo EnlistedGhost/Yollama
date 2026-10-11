@@ -11,7 +11,7 @@ package bcrypt_pbkdf
 import (
 	"crypto/sha512"
 	"errors"
-	"golang.org/x/crypto/blowfish"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/blowfish"
 )
 
 const blockSize = 32

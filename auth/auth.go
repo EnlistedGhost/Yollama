@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang.org/x/crypto/ssh"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh"
 )
 
 const defaultPrivateKey = "id_ed25519"

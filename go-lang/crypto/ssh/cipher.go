@@ -18,8 +18,8 @@ import (
 	"io"
 	"slices"
 
-	"golang.org/x/crypto/chacha20"
-	"golang.org/x/crypto/internal/poly1305"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/chacha20"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/internal/poly1305"
 )
 
 const (

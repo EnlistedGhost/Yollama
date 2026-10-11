@@ -9,7 +9,7 @@
 //
 // To use it, import the package like
 //
-//	import _ "golang.org/x/crypto/x509roots/fallback"
+//	import _ "github.com/EnlistedGhost/Yollama/go-lang/crypto/x509roots/fallback"
 //
 // It's recommended that only binaries, and not libraries, import this package.
 //
@@ -21,7 +21,7 @@ package fallback
 import (
 	"crypto/x509"
 
-	"golang.org/x/crypto/x509roots/fallback/bundle"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/x509roots/fallback/bundle"
 )
 
 func init() {

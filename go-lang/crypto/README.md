@@ -1,6 +1,6 @@
 # Go Cryptography
 
-[![Go Reference](https://pkg.go.dev/badge/golang.org/x/crypto.svg)](https://pkg.go.dev/golang.org/x/crypto)
+[![Go Reference](https://pkg.go.dev/badge/github.com/EnlistedGhost/Yollama/go-lang/crypto.svg)](https://pkg.go.dev/github.com/EnlistedGhost/Yollama/go-lang/crypto)
 
 This repository holds supplementary Go cryptography packages.
 

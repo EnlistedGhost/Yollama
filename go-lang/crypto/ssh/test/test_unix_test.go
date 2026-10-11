@@ -20,9 +20,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"golang.org/x/crypto/internal/testenv"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/testdata"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/internal/testenv"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh/testdata"
 )
 
 // unixConnection creates two halves of a connected net.UnixConn.  It

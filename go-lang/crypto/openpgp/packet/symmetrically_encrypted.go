@@ -8,7 +8,7 @@ import (
 	"crypto/cipher"
 	"crypto/sha1"
 	"crypto/subtle"
-	"golang.org/x/crypto/openpgp/errors"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/openpgp/errors"
 	"hash"
 	"io"
 	"strconv"

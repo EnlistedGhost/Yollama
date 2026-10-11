@@ -33,7 +33,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/olekukonko/tablewriter"
 	"github.com/EnlistedGhost/Yollama/cobra"
-	"golang.org/x/crypto/ssh"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 

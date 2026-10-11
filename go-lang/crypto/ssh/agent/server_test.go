@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/crypto/ssh"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh"
 )
 
 func TestServer(t *testing.T) {

@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package test contains integration tests for the
-// golang.org/x/crypto/ssh package.
+// github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh package.
 //
 // Deprecated: this package is for internal use only.
 package test

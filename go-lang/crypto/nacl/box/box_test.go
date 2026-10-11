@@ -10,7 +10,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"golang.org/x/crypto/curve25519"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/curve25519"
 )
 
 func TestSealOpen(t *testing.T) {

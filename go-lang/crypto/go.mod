@@ -1,4 +1,4 @@
-module golang.org/x/crypto
+module github.com/EnlistedGhost/Yollama/go-lang/crypto
 
 go 1.25.0
 

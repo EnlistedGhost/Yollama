@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/internal/testenv"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/testdata"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/internal/testenv"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/ssh/testdata"
 )
 
 type serverTest struct {

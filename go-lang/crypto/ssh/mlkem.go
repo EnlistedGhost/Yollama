@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/curve25519"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/curve25519"
 )
 
 // mlkem768WithCurve25519sha256 implements the hybrid ML-KEM768 with

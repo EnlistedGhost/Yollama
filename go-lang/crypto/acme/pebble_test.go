@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/acme"
+	"github.com/EnlistedGhost/Yollama/go-lang/crypto/acme"
 )
 
 const (
