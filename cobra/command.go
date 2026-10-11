@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"server"
 	"sort"
 	"strings"
 
@@ -45,6 +46,10 @@ type FParseErrWhitelist flag.ParseErrorsAllowlist
 type Group struct {
 	ID    string
 	Title string
+}
+
+type GetModelsLoaded struct {
+	serv       		*Server
 }
 
 // Command is just that, a command for your application.
@@ -167,7 +172,8 @@ type Command struct {
 	// globNormFunc is the global normalization function
 	// that we can use on every pflag set and children commands
 	globNormFunc func(f *flag.FlagSet, name string) flag.NormalizedName
-
+	// loadedCommand is in order to display currently loaded LLM Models
+	loadedCommand * Command
 	// usageFunc is usage func defined by user.
 	usageFunc func(*Command) error
 	// usageTemplate is usage template defined by user.
@@ -539,6 +545,22 @@ func (c *Command) UsageString() string {
 	c.errWriter = tmpErr
 
 	return bb.String()
+}
+
+// Loaded displays the number of currently loaded and running LLM Models
+func (c *Command) loadedCommand() {
+	//
+	Run: func(c *Command) {
+		loaded_list_ar := serv.CmdLoadedModelsHandler()
+		if len(loaded_list_ar) > 0 {
+			c.Println("Currently Loaded Model(s):")
+			for model, _, _, _ := range loaded_list_ar {
+				c.Println(model)
+			}
+		} else {
+			c.Println("No LLM Model(s) are currently loaded.")
+		}
+	}
 }
 
 // FlagErrorFunc returns either the function set by SetFlagErrorFunc for this

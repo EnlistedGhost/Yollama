@@ -12,19 +12,25 @@ import (
 )
 
 var ErrInvalidDigestFormat = errors.New("invalid digest format")
+var fThrewConsoleLog = 0
+var fThrewConsoleErr = false
 
 // getYollamaTLSConfigPath returns the full path to the llama-cpp_v.conf file.
 func get_Aux_Model_Path() (string, error) {
     // 1. Get the dynamic home directory path
     rootDir, err := os.UserHomeDir()
     if err != nil {
-        fmt.Errorf("[YOLLAMA] | Aux model (secondary) pathing file error: %v", err)
+        	fmt.Errorf("[YOLLAMA] | ❌ Aux model (secondary) pathing file error: %v", err)
         return "", err
     }
 
     // 2. Safely join the home directory with the .yollama folder
     v_file_path := filepath.Join(rootDir, ".yollama")
-    fmt.Println("Aux model Config - Checking Primary Directory:", v_file_path)
+    if fThrewConsoleLog < 3 {
+        fmt.Println("Aux model Config - Checking Primary Directory:", v_file_path)
+    }
+
+    fThrewConsoleLog += 1
 
     v_Llama_Path := filepath.Join(v_file_path, "yollama_paths.conf")
     return v_Llama_Path, err
@@ -36,7 +42,7 @@ func read_Aux_Model_Path(found_model_aux_path string) (string, error) {
     // Read entire file into byte slice
     get_Aux_Model_Path, err := os.ReadFile(found_model_aux_path)
     if err != nil {
-        return "None", fmt.Errorf("[YOLLAMA] | failed to read aux model config file: %w", err)
+        	return "None", fmt.Errorf("[YOLLAMA] | failed to read aux model config file: %w", err)
     }
 
     // Convert bytes to string (trim whitespace and newlines)
@@ -52,16 +58,25 @@ func report_Aux_Model_Path() (string, error) {
         fmt.Errorf("[YOLLAMA] | ❌ Failed to resolve aux model-location config file path.", "error", err)
 		return "None", err
     } else {
-        fmt.Printf("[YOLLAMA] | ✅ Fetched configured aux model-location file path: %s\n", path_aux_models)
+        if fThrewConsoleLog < 3 {
+        	fmt.Printf("[YOLLAMA] | ✅ Fetched configured aux model-location file path: %s\n", path_aux_models)
+        }
+
+        fThrewConsoleLog += 1
     }
 
     secondary_aux_model_path, err := read_Aux_Model_Path(path_aux_models)
     if err != nil {
-        // Fail open to "None"
-        fmt.Printf("[YOLLAMA] | ⚠️ Llama.cpp aux model-location file unreadable; defaulting to 'None'", "error", err)
+        if fThrewConsoleErr == false {
+        	fmt.Printf("[YOLLAMA] | ⚠️ Llama.cpp aux model-location file unreadable; defaulting to 'None'", "error", err)
+        }
+        fThrewConsoleErr = true
         return "None", err
     } else {
-      	fmt.Printf("[YOLLAMA] | ✅ Fetched aux model-location file with value: %s\n", secondary_aux_model_path)
+      	if fThrewConsoleLog < 3 {
+        	fmt.Printf("[YOLLAMA] | ✅ Fetched aux model-location file with value: %s\n", secondary_aux_model_path)
+        }
+        fThrewConsoleLog += 1
     }
 
     return secondary_aux_model_path, nil
@@ -102,14 +117,20 @@ func AuxPath() (string, error) {
 func Path() (string, string, bool, error) {
 	path, err := PrimaryPath()
 	if err != nil {
-		fmt.Printf("[YOLLAMA] | ⚠️ Primary Model-Storage location and pathing disabled!")
+		if fThrewConsoleErr == false {
+        	fmt.Printf("[YOLLAMA] | ⚠️ Primary Model-Storage location and pathing disabled!")
+        }
+        fThrewConsoleErr = true
 	}
 
 	path_aux, aux_err := AuxPath()
 	incl_aux := true
 	if aux_err != nil {
 		incl_aux = false
-		fmt.Printf("[YOLLAMA] | ⚠️ Auxiliary Model-Storage location and pathing disabled!")
+		if fThrewConsoleErr == false {
+        	fmt.Printf("[YOLLAMA] | ⚠️ Auxiliary Model-Storage location and pathing disabled!")
+        }
+        fThrewConsoleErr = true
 	}
 
 	if err != nil && aux_err != nil {

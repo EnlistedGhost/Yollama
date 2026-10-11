@@ -210,7 +210,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 }
 
 func (s *Scheduler) processPending(ctx context.Context) {
-	maxRunners := uint(2)//TODO CUSTOM_MOD envconfig.MaxRunners()
+	maxRunners := uint(4)//TODO CUSTOM_MOD envconfig.MaxRunners()
 
 	for {
 		select {
@@ -245,9 +245,9 @@ func (s *Scheduler) processPending(ctx context.Context) {
 				} else if maxRunners > 0 && loadedCount >= int(maxRunners) {
     				slog.Debug("max runners achieved, unloading one to make room", "runner_count", loadedCount)
     				runnerToExpire = s.findRunnerToUnload()
-				} else if pending.schedAttempts > 1 {
+				} else if pending.schedAttempts >= 5 {
     				// trigger if runner == nil (cold load) 
-    				slog.Debug("queued runner found, unloading now scheduled for current runner!")
+    				slog.Debug("max queue for runner found, unloading current runner in favor of next-in-queue!")
     				runnerToExpire = s.findRunnerToUnload()
     				// Safety check to prevent panic if nothing is loaded
     				if runnerToExpire != nil { 
@@ -283,7 +283,7 @@ func (s *Scheduler) processPending(ctx context.Context) {
 							g := s.getGpuFn(ctx, runnersSnapshot)
 							maxRunners = uint(defaultModelsPerGPU * max(len(g), 1))
 						} else {
-						maxRunners = uint(defaultModelsPerGPU * max(len(gpus), 1))
+							maxRunners = uint(defaultModelsPerGPU * max(len(gpus), 1))
 						}
 						slog.Debug("updating default concurrency", "YOLLAMA_MAX_LOADED_MODELS", maxRunners, "gpu_count", len(gpus))
 					}
@@ -305,25 +305,25 @@ func (s *Scheduler) processPending(ctx context.Context) {
 					// More than one loaded model, so we have to see if the
 					// new one fits
 					logutil.Trace("loading additional model", "model", pending.model.ModelPath)
-					needEvict := s.loadFn(pending, systemInfo, gpus, true)
-					if !needEvict {
-						slog.Debug("new model fits with existing models, loading")
-						break
-					}
+					//needEvict := s.loadFn(pending, systemInfo, gpus, true)
+					//if !needEvict {
+					//	slog.Debug("new model fits with existing models, loading")
+					break
+					//}
 
 					// OOM retry path: load() crashed post-spawn and we still
 					// have other models resident. Evict all of them, wait for
 					// every unload, then loop back to retry the load once.
 					// load() has already set oomRetryAttempted so a second
 					// crash falls through to the fail-fast path.
-					if pending.oomRetryAttempted {
-						if !s.evictAllAndWait(ctx, pendingKey) {
-							return
-						}
-						continue
-					}
+					//if pending.oomRetryAttempted {
+					//	if !s.evictAllAndWait(ctx, pendingKey) {
+					//		return
+					//	}
+					//	continue
+					//}
 
-					runnerToExpire = s.findRunnerToUnload()
+					//runnerToExpire = s.findRunnerToUnload()
 				}
 
 				if runnerToExpire == nil {

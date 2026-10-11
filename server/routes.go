@@ -55,7 +55,7 @@ func writeModelRefParseError(c *gin.Context, err error, fallbackStatus int, fall
 
 // Set to either release or debug if development iteration
 var mode string = gin.ReleaseMode
-var modelLoadedNum int = 0
+var ModelLoadedNum int = 0
 
 type Server struct {
 	addr          net.Addr
@@ -870,7 +870,7 @@ func Serve(ln net.Listener) error {
 		srvr.Close()
 		schedDone()
 		sched.unloadAllRunners()
-		modelLoadedNum = 0
+		ModelLoadedNum = 0
 		done()
 	}()
 
@@ -979,6 +979,18 @@ func (s *Server) LoadedModelsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"models": activeSnapshot,
 	})
+}
+
+func (s *Server) CmdLoadedModelsHandler() ([]loadedModel) {
+	// Get from scheduler
+	activeSnapshot := s.sched.loadedModels()
+
+	// If no models are loaded, return an empty array
+	if activeSnapshot == nil {
+		activeSnapshot = []loadedModel{}
+	}
+
+	return activeSnapshot
 }
 
 func waitForStream(c *gin.Context, ch chan any) {
