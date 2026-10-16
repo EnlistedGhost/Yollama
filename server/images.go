@@ -22,6 +22,7 @@ import (
 
 	"github.com/EnlistedGhost/Yollama/api"
 	"github.com/EnlistedGhost/Yollama/envconfig"
+	"github.com/EnlistedGhost/Yollama/fs/gguf"
 	"github.com/EnlistedGhost/Yollama/manifest"
 	"github.com/EnlistedGhost/Yollama/parser"
 	"github.com/EnlistedGhost/Yollama/template"
@@ -386,6 +387,7 @@ func resolveModelManifest(name string) (model.Name, *manifest.Manifest, error) {
 	return n, mf, nil
 }
 
+// Re-implemented Yollama's original in-house "CheckForModel" function
 func CheckForModel(name string) (*Model, error) {
 	slog.Info("[YOLLAMA] | CheckForModel() - Function Called")
 	n, mf, err := resolveModelManifest(name)
@@ -401,13 +403,6 @@ func CheckForModel(name string) (*Model, error) {
 	}
 
 	for _, layer := range mf.Layers {
-		// Nothing below reads a tensor layer, and resolving a path costs a
-		// syscall each. Named rather than allow listing the types below, so a new
-		// layer type is slower here instead of silently unread.
-		if layer.MediaType == manifest.MediaTypeImageTensor {
-			continue
-		}
-
 		normalizedType := NormalizeMediaType(layer.MediaType)
 		filename, err := manifest.BlobsPath(layer.Digest)
 		if err != nil {
@@ -418,10 +413,12 @@ func CheckForModel(name string) (*Model, error) {
 		if normalizedType == "application/vnd.yollama.image.model" {
 			m.ModelPath = filename
 			if m.isGGUF() {
+				f, err := gguf.Open(filename)
 				if err != nil {
 					slog.Error("[YOLLAMA] | CheckForModel - couldn't open model file", "error", err)
 					return nil, err
 				}
+				f.Close()
 				break
 			}
 		}
@@ -779,7 +776,7 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 
 	fn(api.ProgressResponse{Status: "writing manifest"})
 
-	fp, err := manifest.PathForName(n)
+	fp, err := manifest.PathForPull(n)
 	if err != nil {
 		return err
 	}
@@ -906,8 +903,8 @@ func makeRequestWithRetry(ctx context.Context, method string, requestURL *url.UR
 // addresses for testing. For example, the model name ("example.com/my/model")
 // can be directed to push/pull from "127.0.0.1:1234".
 //
-// This is not safe to set across goroutines. It should be set in
-// the main test goroutine, and not by tests marked to run in parallel with
+// This is not safe to set across go-routines. It should be set in
+// the main test go-routine, and not by tests marked to run in parallel with
 // t.Parallel().
 //
 // It should be cleared after use, otherwise it will affect other tests.

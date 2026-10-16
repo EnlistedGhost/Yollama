@@ -489,6 +489,15 @@ func appendLocalFileArgs(params []string, opts api.Options) []string {
 
 func appendMmapArgs(params []string, opts api.Options) []string {
 	fCheckedLlama, fLegacyLlama, vMsg := should_Append_Llama_Args()
+
+	//if opts.UseMMap != nil {
+	//	fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined MMap value: %s\n", opts.UseMMap)
+
+	//	params = append(params, "--load-mode", strconv.Itoa(opts.NumCtx))
+
+	//	return params
+	//} 
+
     if !fLegacyLlama && !fCheckedLlama {
     	slog.Error("[YOLLAMA] | ❌ Llama.cpp Version ERROR: %s\n", vMsg)
     	return params
@@ -497,7 +506,9 @@ func appendMmapArgs(params []string, opts api.Options) []string {
     	params = append(params, "--mmap")
     } else {
     	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is New-Type Version: %s\n", vMsg)
-    	params = append(params, "--load-mode", "mmap")
+    //	params = append(params, "--load-mode", "mmap")
+    	params = append(params, "--load-mode", "mlock")
+    	params = append(params, "--lazy-mode", "off")
     }
 
     return params

@@ -217,6 +217,31 @@ func PathForName(n model.Name) (string, error) {
 	return model_manifest, nil
 }
 
+// PathForPull returns the path to the to be created manifest file during model pull.
+func PathForPull(n model.Name) (string, error) {
+	if !n.IsValid() {
+		return "", os.ErrNotExist
+	}
+
+	model_manifest := "None"
+
+	manifests, aux_manifests, fAux, err := Path()
+	if err != nil {
+		return "", err
+	}
+
+	primary_location:= filepath.Join(manifests, n.Filepath())
+	auxiliary_location := filepath.Join(aux_manifests, n.Filepath())
+
+	if fAux == true {
+		model_manifest = auxiliary_location
+	} else {
+		model_manifest = primary_location
+	}
+
+	return model_manifest, nil
+}
+
 func BlobsPath(digest string) (string, error) {
 	digest = strings.ReplaceAll(digest, ":", "-")
 
