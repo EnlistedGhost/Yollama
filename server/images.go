@@ -691,6 +691,41 @@ func PruneLayers() error {
 func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn func(api.ProgressResponse)) error {
 	n := model.ParseName(name)
 
+	// Precede Huggingface's "Nanny" Bullshit since we are capable of shard handling
+	if strings.Contains(n.Host, "huggingface.co") || strings.Contains(name, "hf.co") {
+		slog.Info("[YOLLAMA] Proactively hijacking Hugging Face path. Bypassing OCI handshake entirely.")
+		
+		fn(api.ProgressResponse{Status: "pulling manifest via shard_conductor"})
+		
+		// Fall straight back to your conductor to fetch files directly
+		mf, manifestData, err := PullShardedGGUFManifest(ctx, n, regOpts)
+		if err != nil {
+			return err
+		}
+
+		var layers []manifest.Layer
+		layers = append(layers, mf.Layers...)
+		if mf.Config.Digest != "" {
+			layers = append(layers, mf.Config)
+		}
+
+		// Inline the manifest completion logic here to finish the job cleanly
+		fn(api.ProgressResponse{Status: "writing manifest"})
+		fp, err := manifest.PathForPull(n)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(fp, manifestData, 0o644); err != nil {
+			return err
+		}
+		
+		fn(api.ProgressResponse{Status: "success"})
+		return nil
+	}
+
 	// build deleteMap to prune unused layers
 	deleteMap := make(map[string]struct{})
 	existingMf, err := manifest.ParseNamedManifest(n)
@@ -712,10 +747,9 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	}
 
 	fn(api.ProgressResponse{Status: "pulling manifest"})
-
 	mf, manifestData, err := pullModelManifest(ctx, n, regOpts)
 	if err != nil {
-		return fmt.Errorf("pull model manifest: %s", err)
+		return err
 	}
 
 	var layers []manifest.Layer
@@ -735,11 +769,8 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 		if err != nil {
 			return err
 		}
-		// If any download of a given digest was not a cache hit,
-		// always verify it. Without this guard, a config entry
-		// sharing a digest with a layer can overwrite the layer's
-		// false (needs verification) with true (cache hit), since
-		// the blob now exists on disk from the first download.
+
+		// Guard against mutation/manipulation
 		if existing, ok := skipVerify[layer.Digest]; !ok {
 			skipVerify[layer.Digest] = cacheHit
 		} else {
