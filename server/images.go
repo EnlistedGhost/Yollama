@@ -690,40 +690,59 @@ func PruneLayers() error {
 
 func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn func(api.ProgressResponse)) error {
 	n := model.ParseName(name)
+	fSplitPull := false
 
-	// Precede Huggingface's "Nanny" Bullshit since we are capable of shard handling
+	// --------------------------------------------------------------------------
+	// Supersede Huggingface's "Nanny" API handling/logic Bullshit!
+	// Unlike the reference code - this project is capable of -
+	// model shard pull handling!
+	//
+	// [Developer's Personal Note]
+	// Oh yeah, no... You deserve the above comment... assholes!
+	// --------------------------------------------------------------------------
 	if strings.Contains(n.Host, "huggingface.co") || strings.Contains(name, "hf.co") {
 		slog.Info("[YOLLAMA] Proactively hijacking Hugging Face path. Bypassing OCI handshake entirely.")
 		
 		fn(api.ProgressResponse{Status: "pulling manifest via shard_conductor"})
 		
-		// Fall straight back to your conductor to fetch files directly
+		// Initially attempt split-GGUF (multi-Shard) Model Pull
 		mf, manifestData, err := PullShardedGGUFManifest(ctx, n, regOpts)
 		if err != nil {
-			return err
+			// If we fail, continue attempting a standard unified GGUF model pull
+			slog.Warn("Model Pull Request for Multi-Shard type failed!", "name", name, "error", err)
+			slog.Info("[Attempting to fulfill request if 'Pull-Type' is Unified Model Pull Request!]")
+			fSplitPull = false
+		} else {
+			fSplitPull = true
 		}
 
-		var layers []manifest.Layer
-		layers = append(layers, mf.Layers...)
-		if mf.Config.Digest != "" {
-			layers = append(layers, mf.Config)
-		}
+		// Inline manifest completion logic if pull is split-GGUF/multi-Shard
+		if fSplitPull {
+			var layers []manifest.Layer
+			layers = append(layers, mf.Layers...)
 
-		// Inline the manifest completion logic here to finish the job cleanly
-		fn(api.ProgressResponse{Status: "writing manifest"})
-		fp, err := manifest.PathForPull(n)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(fp, manifestData, 0o644); err != nil {
-			return err
-		}
+			if mf.Config.Digest != "" {
+				layers = append(layers, mf.Config)
+			}
+
+			fn(api.ProgressResponse{Status: "writing manifest"})
+			fp, err := manifest.PathForPull(n)
+
+			if err != nil {
+				return err
+			}
+
+			if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+				return err
+			}
+
+			if err := os.WriteFile(fp, manifestData, 0o644); err != nil {
+				return err
+			}
 		
-		fn(api.ProgressResponse{Status: "success"})
-		return nil
+			fn(api.ProgressResponse{Status: "success"})
+			return nil
+		}
 	}
 
 	// build deleteMap to prune unused layers
