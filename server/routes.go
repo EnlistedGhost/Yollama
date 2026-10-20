@@ -418,7 +418,7 @@ func GetModelInfo(req api.ShowRequest) (*api.ShowResponse, error) {
 		return nil, err
 	}
 
-	m, err := GetModel(name.String())
+	m, err := GetModelCapabilities(name.String())
 	if err != nil {
 		return nil, err
 	}
@@ -551,6 +551,9 @@ func selectedModelTemplate(m *Model, kv ggml.KV) string {
 	return m.Template.String()
 }
 
+//
+// TODO: Split "ListHandler" into modular functions and make callable
+//
 func (s *Server) ListHandler(c *gin.Context) {
 	// 1. Check raw active registry counts before fetching cache data
 	//rawManifests, manifestErr := manifest.Manifests(true)
@@ -1173,7 +1176,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	m, err := GetModel(name.String())
+	m, err := GetModelCapabilities(name.String())
 	if err != nil {
 		switch {
 		case os.IsNotExist(err):

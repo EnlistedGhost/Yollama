@@ -482,30 +482,6 @@ func createModel(r api.CreateRequest, name model.Name, baseLayers []*layerGGML, 
 				config.ModelType = cmp.Or(config.ModelType, format.HumanNumber(layer.GGML.KV().ParameterCount()))
 				config.FileType = cmp.Or(config.FileType, layer.GGML.KV().FileType().String())
 				config.ModelFamilies = append(config.ModelFamilies, layer.GGML.KV().Architecture())
-
-				// Auto-detect renderer, parser, and stop tokens from GGUF architecture.
-				// TODO: abstract this into a registry/lookup table when multiple models
-				// need architecture-based renderer/parser/stop defaults.
-				if config.Renderer == "" || config.Parser == "" {
-					arch := layer.GGML.KV().Architecture()
-					switch arch {
-					case "gemma4":
-						config.Renderer = cmp.Or(config.Renderer, gemma4RendererLegacy)
-						config.Parser = cmp.Or(config.Parser, "gemma4")
-						if _, ok := r.Parameters["stop"]; !ok {
-							if r.Parameters == nil {
-								r.Parameters = make(map[string]any)
-							}
-							r.Parameters["stop"] = []string{"<turn|>"}
-						}
-					case "laguna":
-						config.Renderer = cmp.Or(config.Renderer, "laguna")
-						config.Parser = cmp.Or(config.Parser, "laguna")
-					case "nemotron_h", "nemotron_h_moe", "nemotron_h_omni":
-						config.Renderer = cmp.Or(config.Renderer, "nemotron-3-nano")
-						config.Parser = cmp.Or(config.Parser, "nemotron-3-nano")
-					}
-				}
 			}
 		}
 		layers = append(layers, layer.Layer)

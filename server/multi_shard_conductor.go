@@ -14,6 +14,7 @@ import (
 	"strings"
 	"log/slog"
 
+	"github.com/EnlistedGhost/Yollama/api"
 	"github.com/EnlistedGhost/Yollama/manifest"
 	"github.com/EnlistedGhost/Yollama/types/model"
 )
@@ -27,14 +28,18 @@ type HFFile struct {
 
 // PullShardedGGUFManifest orchestrates downloading all pieces of a sharded model,
 // merging them via the local toolchain, and returning a clean manifest back to PullModel.
-func PullShardedGGUFManifest(ctx context.Context, n model.Name, regOpts *registryOptions) (*manifest.Manifest, []byte, error) {
-	// 1. Discover remote paths
+func PullShardedGGUFManifest(ctx context.Context, n model.Name, regOpts *registryOptions, fn func(api.ProgressResponse)) (*manifest.Manifest, []byte, error) {
+	// Update the UI that requested the Pull- this is repeated several times
+	// All additional api progress responses calls will not be commented on
+	fn(api.ProgressResponse{Status: "Building a multi-shard model pull recipe..."})
+	// Query model chard list
 	shardPaths, err := fetchAndFilterHFShards(ctx, n)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Create temporary staging
+	fn(api.ProgressResponse{Status: "Creating temporary multi-shard assembly directory..."})
+	// Stage temp shard pull location
 	baseBlobDir, err := manifest.BlobsPath("")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to locate layout path for local content storage: %w", err)
@@ -50,7 +55,11 @@ func PullShardedGGUFManifest(ctx context.Context, n model.Name, regOpts *registr
 
 	// Download each shard file
 	for i, shardPath := range shardPaths {
-		slog.Info(fmt.Sprintf("[Shard %d/%d] Beginning download for: %s", i+1, len(shardPaths), path.Base(shardPath)))
+		infoPullStr := fmt.Sprintf("[Shard %d/%d] Currently Downloading. (Pulling Model: %s)", i+1, len(shardPaths), path.Base(shardPath))
+
+		slog.Info(infoPullStr)
+		fn(api.ProgressResponse{Status: infoPullStr})
+
 		err := downloadShardFile(ctx, n, shardPath, stageDir, regOpts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to download shard %s: %w", path.Base(shardPath), err)
@@ -58,8 +67,9 @@ func PullShardedGGUFManifest(ctx context.Context, n model.Name, regOpts *registr
 	}
 
 	slog.Info("[CONDUCTOR] All shards downloaded successfully. Transferring control to toolchain pipeline...")
+	fn(api.ProgressResponse{Status: "Merging multi-shard model into one unified model-file..."})
 
-	// 4. Feed the staged folder straight into our direct-merge function
+	// Feed staged folder into our direct-merge function
 	var localFiles []string
 	for _, shardPath := range shardPaths {
 		localFiles = append(localFiles, filepath.Join(stageDir, path.Base(shardPath)))
@@ -70,7 +80,8 @@ func PullShardedGGUFManifest(ctx context.Context, n model.Name, regOpts *registr
 		return nil, nil, fmt.Errorf("failed to compile and merge shards: %w", err)
 	}
 
-	// 5. Generate a synthetic manifest structure to hand back to PullModel
+	// Generate a synthetic manifest structure to hand back to PullModel
+	fn(api.ProgressResponse{Status: "Generating synthetic manifests..."})
 	mf, manifestBytes, err := generateSyntheticManifest(assembledDigest)
 	return mf, manifestBytes, err
 }
@@ -111,13 +122,13 @@ func downloadShardFile(ctx context.Context, n model.Name, shardPath string, dest
 
 // fetchAndFilterHFShards queries the Hugging Face file tree API and returns the matching shard paths
 func fetchAndFilterHFShards(ctx context.Context, n model.Name) ([]string, error) {
-	// 1. Leverage your verified base URL pattern
+	// Leverage your verified base URL pattern
 	modelURL := n.BaseURL()
 	
-	// 2. Chain the target endpoints natively
+	// Chain the target endpoints natively
 	requestURL := modelURL.JoinPath("api", "models", n.DisplayNamespaceModel(), "tree", "main")
 	
-	// 3. NEW: Inject the recursive query parameter to scan deep subdirectories!
+	// Inject the recursive query parameter to scan deep subdirectories!
 	query := requestURL.Query()
 	query.Set("recursive", "true")
 	requestURL.RawQuery = query.Encode()
@@ -259,7 +270,7 @@ func generateSyntheticManifest(modelDigest string) (*manifest.Manifest, []byte, 
 		return nil, nil, fmt.Errorf("compiled blob file tracking lost: %w", err)
 	}
 
-	// FIXED: Dropped unknown Created field to match structural limits
+	// Dropped unknown Created field to match structural limits
 	configData := model.ConfigV2{
 		Architecture: "llama", 
 	}

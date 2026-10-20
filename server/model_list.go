@@ -72,7 +72,7 @@ func describeModel(name model.Name, mf *manifest.Manifest) (api.ListModelRespons
 		},
 	}
 
-	m, err := GetModel(name.String())
+	m, err := GetModelCapabilities(name.String())
 	if err != nil {
 		// A model that will not load is the one a user most needs to see, in
 		// order to remove it. Report what the manifest says.
