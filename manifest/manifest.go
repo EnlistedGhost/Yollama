@@ -213,7 +213,6 @@ func Manifests(continueOnError bool) (map[model.Name]*Manifest, error) {
 
 	ms := make(map[model.Name]*Manifest)
 
-	// Define a custom recursive function that follows symlinks
 	var walkFn func(basePath, currentPath string) error
 	walkFn = func(basePath, currentPath string) error {
 		entries, err := os.ReadDir(currentPath)
@@ -226,9 +225,9 @@ func Manifests(continueOnError bool) (map[model.Name]*Manifest, error) {
 
 		for _, entry := range entries {
 			fullPath := filepath.Join(currentPath, entry.Name())
-			
-			// Use os.Stat to resolve the true target behind symlinks
-			fi, err := os.Stat(fullPath)
+
+			// 1. Use Lstat so we don't blindly follow broken or missing symlink targets
+			fi, err := os.Lstat(fullPath)
 			if err != nil {
 				if continueOnError {
 					continue
@@ -237,13 +236,32 @@ func Manifests(continueOnError bool) (map[model.Name]*Manifest, error) {
 			}
 
 			if fi.IsDir() {
-				// Recurse into subdirectories
 				if err := walkFn(basePath, fullPath); err != nil && !continueOnError {
 					return err
 				}
 			} else {
-				// We found a manifest file! Compute the relative tracking path
-				rel, err := filepath.Rel(basePath, fullPath)
+    			// We found a file! It could be a legacy symlink OR your custom standalone manifest.
+    
+    			// 1. Check if it's a symlink
+    			if fi.Mode()&os.ModeSymlink != 0 {
+        			targetPath, err := os.Readlink(fullPath)
+        			if err == nil {
+            			if !filepath.IsAbs(targetPath) {
+                			targetPath = filepath.Join(filepath.Dir(fullPath), targetPath)
+            			}
+            			resolvedFi, err := os.Stat(targetPath)
+            			if err == nil {
+                			fi = resolvedFi // Legacy behavior: Bind the true blob file info
+            			}
+        			}
+    			} else {
+        			// 2. EXPLICIT ELSE: It's a regular, standalone manifest file!
+        			// We don't overwrite 'fi'. We let it pass through naturally so its 
+        			// own file information is preserved and sent downstream.
+    			}
+
+    			// Now computing the tracking path works perfectly for both types...
+    			rel, err := filepath.Rel(basePath, fullPath)
 				if err != nil {
 					if continueOnError {
 						continue
@@ -270,17 +288,20 @@ func Manifests(continueOnError bool) (map[model.Name]*Manifest, error) {
 					return fmt.Errorf("%s %w", n, err)
 				}
 
+				// Override fileinfo tracking to guarantee the manifest's size/stats
+				// don't mismatch if our engine uses it for strict lookups later
+				if m.fi == nil {
+					m.fi = fi
+				}
+
 				ms[n] = m
 			}
 		}
 		return nil
 	}
 
-	// Scan each target directory using our custom walker
 	for _, baseManifestDir := range targetDirs {
-		// Log out exactly what directories Yollama is checking to be 100% sure
 		fmt.Printf("[YOLLAMA DEBUG] | Actively sweeping directory: %s\n", baseManifestDir)
-		
 		if err := walkFn(baseManifestDir, baseManifestDir); err != nil && !continueOnError {
 			return nil, err
 		}

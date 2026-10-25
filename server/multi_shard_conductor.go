@@ -29,17 +29,15 @@ type HFFile struct {
 // PullShardedGGUFManifest orchestrates downloading all pieces of a sharded model,
 // merging them via the local toolchain, and returning a clean manifest back to PullModel.
 func PullShardedGGUFManifest(ctx context.Context, n model.Name, regOpts *registryOptions, fn func(api.ProgressResponse)) (*manifest.Manifest, []byte, error) {
-	// Update the UI that requested the Pull- this is repeated several times
-	// All additional api progress responses calls will not be commented on
-	fn(api.ProgressResponse{Status: "Building a multi-shard model pull recipe..."})
-	// Query model chard list
+	// Query model shard list
+	slog.Info(fmt.Sprintf("[CONDUCTOR] Probing model endpoint source for shard-list..."))
 	shardPaths, err := fetchAndFilterHFShards(ctx, n)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	fn(api.ProgressResponse{Status: "Creating temporary multi-shard assembly directory..."})
 	// Stage temp shard pull location
+	slog.Info(fmt.Sprintf("[CONDUCTOR] Creating temporary multi-shard storage..."))
 	baseBlobDir, err := manifest.BlobsPath("")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to locate layout path for local content storage: %w", err)
@@ -57,6 +55,7 @@ func PullShardedGGUFManifest(ctx context.Context, n model.Name, regOpts *registr
 	for i, shardPath := range shardPaths {
 		infoPullStr := fmt.Sprintf("[Shard %d/%d] Currently Downloading. (Pulling Model: %s)", i+1, len(shardPaths), path.Base(shardPath))
 
+		// Terminal/Console Status Readout and Display
 		slog.Info(infoPullStr)
 		fn(api.ProgressResponse{Status: infoPullStr})
 

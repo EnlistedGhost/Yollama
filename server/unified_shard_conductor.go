@@ -61,7 +61,6 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	// Oh yeah, no... You deserve the above comment... assholes!
 	// --------------------------------------------------------------------------
 	slog.Info("[YOLLAMA] Side-stepping any forced API control, probing pull source directly...")
-		fn(api.ProgressResponse{Status: "Probing model structure for multi-shard model pull..."})
 		
 	// Initially attempt split-GGUF (multi-Shard) Model Pull
 	mf, manifestData, err := PullShardedGGUFManifest(ctx, n, regOpts, fn)
@@ -97,7 +96,7 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 			return err
 		}
 		
-		fn(api.ProgressResponse{Status: "success"})
+		fn(api.ProgressResponse{Status: "Success!"})
 		return nil
 	}
 
@@ -118,7 +117,6 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	}
 
 	slog.Info("[Probing URL if 'Pull-Type' is Unified Model Pull Request!]")
-
 	if n.ProtocolScheme == "https" && !regOpts.Insecure {
 		return errInsecureProtocol
 	}
