@@ -114,60 +114,43 @@ func (s *Server) CreateHandler(c *gin.Context) {
 			}
 
 			fromName := fromRef.Name
-			//remoteHost := r.RemoteHost
-			//if fromRef.Source == modelSourceCloud && remoteHost == "" {
-			//	remoteHost = cloudProxyBaseURL
-			//}
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			defer cancel()
 
-			//if remoteHost != "" {
-			//	ru, err := remoteURL(remoteHost)
-			//	if err != nil {
-			//		ch <- gin.H{"error": "bad remote", "status": http.StatusBadRequest}
-			//		return
-			//	}
+			baseLayers, err = parseFromModel(ctx, fromName, fn)
+			if err != nil {
+				ch <- gin.H{"error": err.Error()}
+			}
 
-				//config.RemoteModel = fromRef.Base
-				//config.RemoteHost = ru
-				//remote = true
-			//} else {
-				ctx, cancel := context.WithCancel(c.Request.Context())
-				defer cancel()
-
-				baseLayers, err = parseFromModel(ctx, fromName, fn)
-				if err != nil {
-					ch <- gin.H{"error": err.Error()}
-				}
-
-				if err == nil && !remote {
-					mf, mErr := manifest.ParseNamedManifest(fromName)
-					if mErr == nil && mf.Config.Digest != "" {
-						configPath, pErr := manifest.BlobsPath(mf.Config.Digest)
-						if pErr == nil {
-							if cfgFile, fErr := os.Open(configPath); fErr == nil {
-								var baseConfig model.ConfigV2
-								if decErr := json.NewDecoder(cfgFile).Decode(&baseConfig); decErr == nil {
-									if config.Renderer == "" {
-										config.Renderer = baseConfig.Renderer
-									}
-									if config.Parser == "" {
-										config.Parser = baseConfig.Parser
-									}
-									if config.Requires == "" {
-										config.Requires = baseConfig.Requires
-									}
-									if config.ModelFormat == "" {
-										config.ModelFormat = baseConfig.ModelFormat
-									}
-									if len(config.Capabilities) == 0 {
-										config.Capabilities = baseConfig.Capabilities
-									}
+			if err == nil && !remote {
+				mf, mErr := manifest.ParseNamedManifest(fromName)
+				if mErr == nil && mf.Config.Digest != "" {
+					configPath, pErr := manifest.BlobsPath(mf.Config.Digest)
+					if pErr == nil {
+						if cfgFile, fErr := os.Open(configPath); fErr == nil {
+							var baseConfig model.ConfigV2
+							if decErr := json.NewDecoder(cfgFile).Decode(&baseConfig); decErr == nil {
+								if config.Renderer == "" {
+									config.Renderer = baseConfig.Renderer
 								}
-								cfgFile.Close()
+								if config.Parser == "" {
+									config.Parser = baseConfig.Parser
+								}
+								if config.Requires == "" {
+									config.Requires = baseConfig.Requires
+								}
+								if config.ModelFormat == "" {
+									config.ModelFormat = baseConfig.ModelFormat
+								}
+								if len(config.Capabilities) == 0 {
+									config.Capabilities = baseConfig.Capabilities
+								}
 							}
+							cfgFile.Close()
 						}
 					}
 				}
-			//}
+			}
 		} else if r.Files != nil {
 			baseLayers, err = convertModelFromFiles(r.Files, baseLayers, false, fn)
 			if err != nil {
@@ -602,15 +585,10 @@ func quantizeLayer(layer *layerGGML, quantizeType string, fn func(resp api.Progr
 }
 
 func copyLayerWithLlamaQuantize(layer *layerGGML, fn func(resp api.ProgressResponse)) (*layerGGML, error) {
-	// NOTE: For now, we bypass verification of layers and copy of new layers... 
-	// it's horribly slow and serves not purpose if the model is valid GGUF
+	// NOTE: Yollama conducts a bypass of verification for layers and copy 
+	// pertaining to new layers... 
 	//
-	//newLayer, err := rewriteLayerWithLlamaQuantize(layer, "COPY", fn, func(in, out *os.File, progressFn func(uint64)) error {
-	//	return copyGGUFWithLlamaQuantize(in, out, layer.GGML, progressFn)
-	//})
-	//if err != nil {
-	//	return nil, fmt.Errorf("Yollama Error 44 - failure engaging llama-quantize compatibility newLayer copy: %w", err)
-	//}
+	// it's horribly slow and serves not purpose if the model is valid GGUF
 	return layer, nil
 }
 

@@ -490,25 +490,35 @@ func appendLocalFileArgs(params []string, opts api.Options) []string {
 func appendMmapArgs(params []string, opts api.Options) []string {
 	fCheckedLlama, fLegacyLlama, vMsg := should_Append_Llama_Args()
 
-	//if opts.UseMMap != nil {
-	//	fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined MMap value: %s\n", opts.UseMMap)
-
-	//	params = append(params, "--load-mode", strconv.Itoa(opts.NumCtx))
-
-	//	return params
-	//} 
-
     if !fLegacyLlama && !fCheckedLlama {
     	slog.Error("[YOLLAMA] | ❌ Llama.cpp Version ERROR: %s\n", vMsg)
     	return params
     } else if fLegacyLlama && fCheckedLlama {
-    	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is Legacy Version: %s\n", vMsg)
-    	params = append(params, "--mmap")
+    	/* if opts.UseMMap != nil {
+    		if opts.UseMMap != false {
+				fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined MMap value: %s\n", opts.UseMMap)
+				params = append(params, "--mmap")
+				params = append(params, "--load-mode", strconv.Itoa(opts.NumCtx))
+			}
+		} else { */
+    		fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is Legacy Version: %s\n", vMsg)
+    		params = append(params, "--mmap")
+    	//}
     } else {
-    	fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is New-Type Version: %s\n", vMsg)
-    //	params = append(params, "--load-mode", "mmap")
-    	params = append(params, "--load-mode", "mlock")
-    	params = append(params, "--lazy-mode", "off")
+    	/* if opts.UseMMap != nil {
+    		if opts.UseMMap != false {
+				fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined MMap value: %s\n", opts.UseMMap)
+				params = append(params, "--load-mode", "mmap")
+			} else {
+				fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined MMap value: %s\n", opts.UseMMap)
+				params = append(params, "--load-mode", "mlock")
+    			params = append(params, "--lazy-mode", "off")
+			}
+		} else { */
+    		fmt.Printf("[YOLLAMA] | (llama-server) - Llama.cpp is New-Type Version: %s\n", vMsg)
+    		params = append(params, "--load-mode", "mmap")
+    		
+    	//}
     }
 
     return params
@@ -738,19 +748,14 @@ func getBatchNumFromConfig() (int, error) {
 
 
 func appendBatchArgs(params []string, opts api.Options) []string {
-	//if opts.NumBatch > 0 {
-	//	fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumBatch value: %s\n", opts.NumBatch)
-	//} else {
-	//	opts = WithDefaultModelNumBatch(opts)
-	//	fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using yollama's global config NumBatch value: %s\n", opts.NumBatch)
-	//}
-
 	if opts.NumBatch > 1024 {
-		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumBatch value: %s\n", opts.NumBatch)
+		// Specific "Toggle API Batch Num OFF"
+		if opts.NumBatch != 1234 {
+			fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using API Options defined NumBatch value: %s\n", opts.NumBatch)
+			params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
 
-		params = append(params, "-b", strconv.Itoa(opts.NumBatch), "-ub", strconv.Itoa(opts.NumBatch))
-
-		return params
+			return params
+		}
 	} 
 
 	BatchOpts, err := getBatchNumFromConfig()
@@ -759,7 +764,7 @@ func appendBatchArgs(params []string, opts api.Options) []string {
 		// Fallback to 1024 NumBatch if near-fatal
 		opts.NumBatch = globalModelNumBatch
 	} else {
-		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using yollama's global config NumBatch value: %s\n", strconv.Itoa(BatchOpts))
+		fmt.Printf("[YOLLAMA] | ✅ (llama-server) Using Yollama's global config NumBatch value: %s\n", strconv.Itoa(BatchOpts))
 		opts.NumBatch = BatchOpts
 	}
 
