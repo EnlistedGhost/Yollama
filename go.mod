@@ -16,7 +16,7 @@ require (
 	github.com/EnlistedGhost/Yollama/cobra v0.0.0-20261009150845-579bd9fb975a
 	github.com/agnivade/levenshtein v1.1.1
 	github.com/emirpasic/gods/v2 v2.0.0-alpha
-	github.com/klauspost/compress v1.18.3
+	github.com/klauspost/compress v1.18.7
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/wk8/go-ordered-map/v2 v2.1.8
 	golang.org/x/mod v0.35.0
